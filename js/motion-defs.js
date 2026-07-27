@@ -31,7 +31,7 @@ function motionCase() {
     client: c.clientGen || c.client || mMark('указать ФИО доверителя'),
     clientNom: c.client || mMark('указать ФИО доверителя'),
     qual: (c.episodes[0] && c.episodes[0].qualification) || mMark('указать квалификацию'),
-    firstCourt: court.firstInstanceCourt || mMark('указать суд'),
+    firstCourt: court.firstInstanceCourt || court.firstInstance || mMark('указать суд'),
     advocate: c.advocate || mMark('указать ФИО защитника')
   };
 }
@@ -527,7 +527,7 @@ const MOTION_DEFS = {
       body.push('В соответствии с пунктом 3 части 1 статьи 198 УПК РФ защитник вправе ходатайствовать о производстве экспертизы в конкретном экспертном учреждении и о постановке перед экспертом дополнительных вопросов.');
 
       const plea = [
-        `Назначить по уголовному делу ${c.num} ${t === 'Первичная' ? '' : t.toLowerCase() + ' '}${mVal(kind, 'указать вид').toLowerCase()} экспертизу.`,
+        `Назначить по уголовному делу ${c.num} ${!t || t === 'Первичная' ? '' : t.toLowerCase() + ' '}${kind ? kind.toLowerCase() : mMark('указать вид')} экспертизу.`,
         qs.length ? `Поставить перед экспертом вопросы:<br>${qs.map((q, i) => `${i + 1}) ${q}`).join('<br>')}` : mMark('указать вопросы эксперту')
       ];
       if (org) plea.push(`Производство экспертизы поручить ${org}.`);
@@ -629,9 +629,10 @@ const MOTION_DEFS = {
         body.push(`Местом исполнения меры пресечения предлагается жилое помещение по адресу: ${mVal(req.address, 'указать адрес')}. ${mVal(req.consent, 'указать согласие собственника')}.`);
       }
 
+      const low = (v, ph) => (v ? String(v).toLowerCase() : mMark(ph));
       const plea = cancel
-        ? [`Отменить меру пресечения в виде ${mVal(a.current, 'указать меру').toLowerCase()}, избранную в отношении ${c.client}.`]
-        : [`Изменить меру пресечения в отношении ${c.client} с ${mVal(a.current, 'указать меру').toLowerCase()} на ${mVal(a.newMeasure, 'указать новую меру').toLowerCase()}.`];
+        ? [`Отменить меру пресечения в виде ${low(a.current, 'указать меру')}, избранную в отношении ${c.client}.`]
+        : [`Изменить меру пресечения в отношении ${c.client} с ${low(a.current, 'указать меру')} на ${low(a.newMeasure, 'указать новую меру')}.`];
       if (a.newMeasure === 'Залог' && req.amount) plea.push(`Определить размер залога в сумме ${req.amount} рублей.`);
       if (a.newMeasure === 'Домашний арест' && req.address) plea.push(`Определить местом исполнения меры пресечения жилое помещение по адресу: ${req.address}.`);
       if (a.current === 'Заключение под стражу') plea.push(`${c.clientNom} из-под стражи освободить.`);

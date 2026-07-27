@@ -66,8 +66,8 @@ async function pickMotion(id) {
   const known = state.card.stage;
   if (known && MOTION_STAGES.some(s => s.key === known)) {
     mwCtx.stage = known;
-    const el = addMessage('assistant', `Стадия по карточке дела: <b>${stageLabel(known)}</b>.`);
-    el.innerHTML = el.innerHTML + ' <button class="mw-link" type="button">изменить</button>';
+    const el = addMessage('assistant', '');
+    el.innerHTML = `Стадия по карточке дела: <b>${stageLabel(known)}</b>. <button class="mw-link" type="button">изменить</button>`;
     el.querySelector('.mw-link').addEventListener('click', () => askStage());
     scrollFeed();
     return mwRunStep();
@@ -385,13 +385,17 @@ function mwForm(el, s) {
   const ok = document.createElement('button');
   ok.className = 'mw-ok'; ok.type = 'button';
   ok.textContent = 'Готово';
+  let warned = false;
   ok.addEventListener('click', () => {
     if (state.busy) return;
     const val = {};
     box.querySelectorAll('input[data-k]').forEach(i => { if (i.value.trim()) val[i.dataset.k] = i.value.trim(); });
     const missing = fields.filter(f => !f.optional && !val[f.key]);
-    if (missing.length && !s.optional) {
-      return mwWarn(el, `Заполните обязательные поля: ${missing.map(f => f.label.toLowerCase()).join(', ')}. Незаполненное останется жёлтой меткой в документе.`);
+    // первое нажатие с пробелами — предупреждаем; второе — продолжаем с жёлтой меткой
+    if (missing.length && !s.optional && !warned) {
+      warned = true;
+      ok.textContent = 'Всё равно продолжить';
+      return mwWarn(el, `Не заполнено: ${missing.map(f => f.label.toLowerCase()).join(', ')}. Заполните или нажмите ещё раз — в документе останется жёлтая метка.`);
     }
     el.querySelectorAll('button, input').forEach(x => x.disabled = true);
     addMessage('user', Object.values(val).join(', ') || 'Пропустить');
@@ -438,16 +442,20 @@ function mwEvidence(el, s) {
     const ok = document.createElement('button');
     ok.className = 'mw-ok'; ok.type = 'button';
     ok.textContent = 'Готово';
+    let warned = false;
     ok.addEventListener('click', () => {
       const val = { ...(base || {}) };
       form.querySelectorAll('[data-k]').forEach(i => { if (i.value.trim()) val[i.dataset.k] = i.value.trim(); });
       const need = ['title', ...(s.needPlace ? ['volume', 'sheets'] : []), ...(needSource ? ['obtainedBy'] : [])];
       const missing = need.filter(k => !val[k]);
-      if (missing.length) {
+      // первое нажатие с пробелами — предупреждаем и даём заполнить; второе — идём дальше с жёлтой меткой
+      if (missing.length && !warned) {
+        warned = true;
         mwWarn(el, s.needPlace && (missing.includes('volume') || missing.includes('sheets'))
-          ? 'Том и листы дела обязательны: без точной ссылки суд не обязан искать доказательство.'
-          : 'Заполните обязательные поля.');
-        if (!val.title) return;
+          ? 'Том и листы дела обязательны: без точной ссылки суд не обязан искать доказательство. Заполните поля или нажмите ещё раз — в документе останется жёлтая метка.'
+          : 'Заполните обязательные поля или нажмите ещё раз — в документе останется жёлтая метка.');
+        ok.textContent = 'Всё равно продолжить';
+        return;
       }
       if (needSource && val.obtainedBy === 'survey') {
         mwWarn(el, 'При опросе лица приложите его письменное согласие — без него доказательство легко оспорить.');
@@ -622,7 +630,8 @@ function mwHeaderLines() {
   const ph = t => `<span class="ph-mark">&lt;${t}&gt;</span>`;
   const lines = [];
   if (mwCtx && mwCtx.stage === 'court') {
-    lines.push(`В ${(c.court && c.court.firstInstanceCourt) || ph('вставить наименование суда')}`);
+    const court = c.court || {};
+    lines.push(`В ${court.firstInstanceCourt || court.firstInstance || ph('вставить наименование суда')}`);
   } else {
     lines.push(`${c.investigator || ph('вставить должность, ФИО следователя, орган')}`);
   }
