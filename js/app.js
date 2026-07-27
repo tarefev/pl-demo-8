@@ -2243,12 +2243,17 @@ function generateHeaderLines(type) {
   return [advLine, cliLine];
 }
 
-function renderDocHeader(lines) {
-  docHeaderBodyEl.innerHTML = lines.map(l => `<p>${l}</p>`).join('');
-  const wrap = docHeaderBodyEl.closest('.doc-header');
-  wrap.classList.add('flash');
-  wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  setTimeout(() => wrap.classList.remove('flash'), 1600);
+function renderDocHeader(lines, { silent } = {}) {
+  const html = lines.map(l => `<p>${l}</p>`).join('');
+  // silent — обновление по ходу визарда: не мигаем и не скроллим на каждом шаге
+  if (silent && docHeaderBodyEl.innerHTML === html) return;
+  docHeaderBodyEl.innerHTML = html;
+  if (!silent) {
+    const wrap = docHeaderBodyEl.closest('.doc-header');
+    wrap.classList.add('flash');
+    wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    setTimeout(() => wrap.classList.remove('flash'), 1600);
+  }
   updateChecklist();
 }
 

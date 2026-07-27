@@ -61,6 +61,7 @@ async function pickMotion(id) {
   if (def.forceStage) {
     mwCtx.stage = def.forceStage;
     addMessage('assistant', `Стадия: ${stageLabel(def.forceStage).toLowerCase()} — определена типом ходатайства.`);
+    mwSync();               // каркас документа появляется сразу, до первого вопроса
     return mwRunStep();
   }
   const known = state.card.stage;
@@ -70,6 +71,7 @@ async function pickMotion(id) {
     el.innerHTML = `Стадия по карточке дела: <b>${stageLabel(known)}</b>. <button class="mw-link" type="button">изменить</button>`;
     el.querySelector('.mw-link').addEventListener('click', () => askStage());
     scrollFeed();
+    mwSync();               // каркас документа появляется сразу, до первого вопроса
     return mwRunStep();
   }
   askStage();
@@ -85,6 +87,7 @@ function askStage() {
       mwCtx.stage = s.key;
       state.card.stage = s.key;
       mwCtx.step = 0;
+      mwSync();
       mwRunStep();
     }
   })), 'На какой стадии находится дело? От этого зависят адресат, нормы и объём доступных материалов.');
@@ -111,9 +114,20 @@ function mwRunStep() {
   const total = steps.filter(x => !x.when || x.when(mwCtx)).length;
   const done = steps.slice(0, mwCtx.step).filter(x => !x.when || x.when(mwCtx)).length;
 
+  mwLockPast();          // прошлые шаги в ленте больше не кликаются
   const el = addMessage('assistant', '');
-  el.innerHTML = `<div class="mw-step">Шаг ${done + 1} из ${total}</div><div class="mw-q">${s.q}</div>` +
+  el.innerHTML = `
+    <div class="mw-head">
+      <span class="mw-step">Шаг ${done + 1} из ${total}</span>
+      <button class="mw-back" type="button">← Назад</button>
+    </div>
+    <div class="mw-q">${s.q}</div>` +
     (s.hint ? `<div class="mw-hint">${s.hint}</div>` : '');
+  el.querySelector('.mw-back').addEventListener('click', () => {
+    if (state.busy) return;
+    el.querySelectorAll('button, input, .mw-input').forEach(x => { x.disabled = true; x.contentEditable = 'false'; });
+    mwBack();
+  });
 
   const render = {
     'choice': mwChoice, 'choice-group': mwChoiceGroup, 'multi': mwMulti,
@@ -127,7 +141,79 @@ function mwRunStep() {
 function mwNext(answer, key) {
   if (key) mwCtx.answers[key] = answer;
   mwCtx.step += 1;
+  mwSync();      // документ дособирается сразу — до следующего вопроса
   mwRunStep();
+}
+
+/** Шаг назад: снимаем ответ предыдущего шага и возвращаемся к нему. */
+function mwBack() {
+  const steps = mwCtx.def.steps;
+  let i = mwCtx.step - 1;
+  while (i >= 0 && steps[i].when && !steps[i].when(mwCtx)) i -= 1;
+  if (i < 0) {
+    // с первого шага возвращаемся к выбору типа ходатайства
+    addMessage('user', 'Назад, к выбору ходатайства');
+    mwCtx = null;
+    state.scenario = null;
+    return startMotionWizard();
+  }
+  delete mwCtx.answers[steps[i].key];
+  mwCtx.step = i;
+  addMessage('user', 'Назад');
+  mwSync();
+  mwRunStep();
+}
+
+/**
+ * Живая сборка: документ обновляется на каждом шаге, а не в конце.
+ * Всё, чего ещё нет в ответах, стоит жёлтыми метками — видно, что осталось заполнить.
+ */
+function mwSync() {
+  if (!mwCtx) return;
+  let built;
+  try { built = mwCtx.def.build(mwCtx); } catch { return; }
+  mwCtx.built = built;
+
+  const title = mwCtx.def.title(mwCtx);
+  applyDocTitle(title);
+  state.docType = { key: 'motion', label: title };
+  state.motionNorms = built.norms;
+  renderDocHeader(mwHeaderLines(), { silent: true });
+
+  // мотивировочная часть — один блок, обновляем на месте, чтобы не мигал весь документ
+  const html = built.body.map(p => `<p>${p}</p>`).join('');
+  let body = state.blocks.find(b => b.kind === 'motion-body');
+  const changed = !body || body.html !== html;
+  if (body) body.html = html;
+  else body = getBlock(insertBlock(html, { section: 'facts', kind: 'motion-body' }));
+
+  // приложения
+  const attHtml = built.attachments && built.attachments.length
+    ? `<p><b>Приложения:</b></p><ol>${built.attachments.map(a => `<li>${a}</li>`).join('')}</ol>` : '';
+  const att = state.blocks.find(b => b.kind === 'motion-att');
+  if (attHtml && att) att.html = attHtml;
+  else if (attHtml) insertBlock(attHtml, { section: 'law', kind: 'motion-att' });
+  else if (att) state.blocks.splice(state.blocks.indexOf(att), 1);
+
+  // просительная часть
+  state.pleas = [];
+  built.plea.forEach(p => { if (!state.pleas.includes(p)) state.pleas.push(p); });
+
+  renderBlocks();
+  renderPleas();
+  updateChecklist();
+  if (changed && body) flashBlock(body.id);
+}
+
+/**
+ * Гасим управление в уже пройденных шагах: активным остаётся только последний.
+ * Иначе клик по «Назад» старого шага уводит не туда, куда ожидает пользователь.
+ */
+function mwLockPast() {
+  document.querySelectorAll('#assistant-feed .msg').forEach(msg => {
+    msg.querySelectorAll('.mw-back, .mw-ok, .mw-add, .mw-item, .mw-all, .mw-check input, .mw-input, .mw-field input, .mw-field select, .mw-chip button')
+      .forEach(x => { x.disabled = true; if (x.isContentEditable) x.contentEditable = 'false'; });
+  });
 }
 
 /** Показ предупреждения под шагом (правовой предохранитель). */
@@ -551,78 +637,56 @@ ${caseSummaryForPrompt()}
 
 function mwPreview() {
   setStep('М.Ф');
-  const built = mwCtx.def.build(mwCtx);
-  mwCtx.built = built;
+  mwSync();                       // финальная пересборка
+  const built = mwCtx.built;
   const title = mwCtx.def.title(mwCtx);
 
+  mwLockPast();
   const el = addMessage('assistant', '');
   el.classList.add('msg--card');
   const gaps = built.checklist.filter(c => !c.ok);
   el.innerHTML = `
-    <div class="mw-preview__title">${title}</div>
-    <div class="mw-preview__doc">
-      ${built.body.map(p => `<p>${p}</p>`).join('')}
-      <p class="mw-preview__plea"><b>ПРОШУ:</b></p>
-      <ol>${built.plea.map(p => `<li>${p}</li>`).join('')}</ol>
-      ${built.attachments && built.attachments.length
-        ? `<p><b>Приложения:</b></p><ol>${built.attachments.map(a => `<li>${a}</li>`).join('')}</ol>` : ''}
-    </div>
+    <div class="mw-preview__title">Документ собран — он слева, в редакторе</div>
     <div class="mw-check-list">
       <div class="mw-check-list__title">Готовность к подаче</div>
       ${built.checklist.map(c => `<div class="mw-cl ${c.ok ? 'is-ok' : 'is-gap'}">${c.ok ? '✓' : '!'} ${c.label}</div>`).join('')}
-      ${gaps.length ? '<div class="mw-cl__note">Пункты со знаком «!» остаются жёлтыми метками в документе — заполните их перед подачей.</div>' : ''}
+      ${gaps.length ? '<div class="mw-cl__note">Пункты со знаком «!» отмечены в документе жёлтым — заполните их перед подачей.</div>' : ''}
     </div>
     <div class="mw-note">Ходатайство подлежит рассмотрению непосредственно после заявления, а если это невозможно — не позднее трёх суток (ст. 121 УПК РФ). Решение оформляется постановлением (ст. 122 УПК РФ).</div>`;
 
   const actions = document.createElement('div');
   actions.className = 'mw-actions';
-  const insert = document.createElement('button');
-  insert.className = 'mw-ok'; insert.type = 'button';
-  insert.textContent = 'Вставить в документ';
-  insert.addEventListener('click', () => { insert.disabled = true; mwInsert(title, built); });
-  const again = document.createElement('button');
-  again.className = 'mw-add'; again.type = 'button';
-  again.textContent = 'Начать заново';
-  again.addEventListener('click', () => { mwCtx.answers = {}; mwCtx.step = 0; mwRunStep(); });
-  actions.appendChild(insert);
-  actions.appendChild(again);
+  const done = document.createElement('button');
+  done.className = 'mw-ok'; done.type = 'button';
+  done.textContent = 'Готово, документ верен';
+  done.addEventListener('click', () => {
+    actions.querySelectorAll('button').forEach(b => b.disabled = true);
+    mwFinish(built);
+  });
+  const back = document.createElement('button');
+  back.className = 'mw-add'; back.type = 'button';
+  back.textContent = '← Изменить ответы';
+  back.addEventListener('click', () => {
+    if (state.busy) return;
+    actions.querySelectorAll('button').forEach(b => b.disabled = true);
+    mwCtx.step = mwCtx.def.steps.length;   // встаём в конец и шагаем назад
+    mwBack();
+  });
+  actions.appendChild(done);
+  actions.appendChild(back);
   el.appendChild(actions);
   scrollFeed();
 }
 
-/** Сборка документа в редакторе: шапка, мотивировка, просительная часть, приложения. */
-function mwInsert(title, built) {
-  applyDocTitle(title);
-  state.docType = { key: 'motion', label: title };
-  state.motionNorms = built.norms;
-
-  // шапка по стадии
-  renderDocHeader(mwHeaderLines());
-
-  // мотивировочная часть — одним блоком
-  state.blocks = state.blocks.filter(b => b.kind !== 'motion-body' && b.kind !== 'motion-att');
-  insertBlock(built.body.map(p => `<p>${p}</p>`).join(''), { section: 'facts', kind: 'motion-body' });
-
-  // просительная часть
-  state.pleas = [];
-  built.plea.forEach(p => addPlea(p));
-
-  // приложения
-  if (built.attachments && built.attachments.length) {
-    insertBlock(`<p><b>Приложения:</b></p><ol>${built.attachments.map(a => `<li>${a}</li>`).join('')}</ol>`,
-      { section: 'law', kind: 'motion-att' });
-  }
-
-  renderBlocks();
-  renderPleas();
-  updateChecklist();
-
+/** Завершение: документ уже в редакторе, остаётся зафиксировать результат. */
+function mwFinish(built) {
   const gaps = built.checklist.filter(c => !c.ok).length;
   endScenario(gaps
-    ? `Ходатайство вставлено в документ. Осталось заполнить ${gaps} ${gaps === 1 ? 'пункт' : 'пункта(ов)'} — они отмечены жёлтым.`
-    : 'Ходатайство вставлено в документ и готово к подаче.');
+    ? `Ходатайство собрано. Осталось заполнить ${gaps} ${gaps === 1 ? 'пункт' : 'пункта(ов)'} — они отмечены жёлтым в документе.`
+    : 'Ходатайство собрано и готово к подаче.');
   mwCtx = null;
 }
+
 
 /** Шапка ходатайства: адресат зависит от стадии. */
 function mwHeaderLines() {
