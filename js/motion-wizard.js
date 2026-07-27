@@ -421,6 +421,11 @@ function mwText(el, s) {
   box.className = 'mw-text';
   box.innerHTML = `<div class="mw-input" contenteditable="true" data-ph="Введите текст…"></div>`;
   const input = box.querySelector('.mw-input');
+  // предзаполнение из карточки дела (например, фабула обвинения) — адвокат правит текст
+  if (s.preset) {
+    const pre = typeof s.preset === 'function' ? s.preset(mwCtx) : s.preset;
+    if (pre) input.innerText = String(pre).replace(/\s+/g, ' ').trim();
+  }
   const actions = document.createElement('div');
   actions.className = 'mw-actions';
 
@@ -722,6 +727,9 @@ function mwHeaderLines() {
   // в чьих интересах и по какому обвинению (у осуждённого — «осуждённого по ст. …»)
   const qual = (c.episodes[0] || {}).qualification || ph('часть, статья УК РФ');
   lines.push(`действующего в защиту интересов ${c.clientGen || ph('вставить ФИО доверителя')},`);
+  // по шаблону меры пресечения — действующая мера указывается в шапке
+  const curMeasure = mwCtx && mwCtx.id === 'measure' && (mwCtx.answers || {}).current;
+  if (curMeasure) lines.push(`в отношении которого избрана мера пресечения в виде ${measureForm(curMeasure, 'gen')},`);
   lines.push(/осужд/.test(status)
     ? `${status} по ${qual}`
     : `${status} в совершении преступления, предусмотренного ${qual}`);
