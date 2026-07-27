@@ -2334,3 +2334,6 @@ body.text-only .doc-generated {
 }
 .mw-back:hover { color: var(--accent); background: var(--accent-soft-2); }
 .mw-back:disabled { opacity: .4; cursor: default; }
+
+/* дата и подпись под ходатайством */
+.mw-sign { margin-top: 14px; }

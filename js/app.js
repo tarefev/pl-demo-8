@@ -1391,14 +1391,7 @@ function pleaIntro() {
   const k = state.docType ? state.docType.key : null;
   if (k === 'appeal') return 'На основании изложенного, руководствуясь ст. 389.15, 389.20 УПК РФ, ПРОШУ:';
   if (k === 'cassation') return 'На основании изложенного, руководствуясь ст. 401.14, 401.15 УПК РФ, ПРОШУ:';
-  if (k === 'motion') {
-    // нормы конкретного ходатайства подставляет визард
-    const norms = (state.motionNorms || []).filter(n => /УПК|УК|Федерального закона|Правительства/.test(n));
-    const uniq = [...new Set(norms)].slice(0, 4);
-    return uniq.length
-      ? `На основании изложенного, руководствуясь ${uniq.join(', ')}, ПРОШУ:`
-      : 'На основании изложенного, руководствуясь ст. 119–122 УПК РФ, ПРОШУ:';
-  }
+  if (k === 'motion') return motionPleaIntro();
   return 'На основании изложенного ПРОШУ:';
 }
 

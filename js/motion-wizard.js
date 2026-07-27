@@ -187,13 +187,13 @@ function mwSync() {
   if (body) body.html = html;
   else body = getBlock(insertBlock(html, { section: 'facts', kind: 'motion-body' }));
 
-  // приложения
-  const attHtml = built.attachments && built.attachments.length
-    ? `<p><b>Приложения:</b></p><ol>${built.attachments.map(a => `<li>${a}</li>`).join('')}</ol>` : '';
+  // приложения + дата и подпись (по шаблону идут после просительной части)
+  const attHtml = (built.attachments && built.attachments.length
+    ? `<p><b>Приложение:</b></p><ol>${built.attachments.map(a => `<li>${a}</li>`).join('')}</ol>` : '')
+    + mwSignHtml();
   const att = state.blocks.find(b => b.kind === 'motion-att');
-  if (attHtml && att) att.html = attHtml;
-  else if (attHtml) insertBlock(attHtml, { section: 'law', kind: 'motion-att' });
-  else if (att) state.blocks.splice(state.blocks.indexOf(att), 1);
+  if (att) att.html = attHtml;
+  else insertBlock(attHtml, { section: 'law', kind: 'motion-att' });
 
   // просительная часть
   state.pleas = [];
@@ -688,22 +688,79 @@ function mwFinish(built) {
 }
 
 
-/** Шапка ходатайства: адресат зависит от стадии. */
+/**
+ * Шапка ходатайства по шаблону: адресат, номер дела, полные реквизиты защитника,
+ * в чьих интересах и по какому обвинению, адрес и телефон для корреспонденции.
+ */
 function mwHeaderLines() {
   const c = state.card;
+  const court = c.court || {};
   const ph = t => `<span class="ph-mark">&lt;${t}&gt;</span>`;
   const lines = [];
+
+  // адресат
   if (mwCtx && mwCtx.stage === 'court') {
-    const court = c.court || {};
     lines.push(`В ${court.firstInstanceCourt || court.firstInstance || ph('вставить наименование суда')}`);
+    if (court.judge) lines.push(court.judge);
   } else {
-    lines.push(`${c.investigator || ph('вставить должность, ФИО следователя, орган')}`);
+    // в карточке наименование органа часто уже входит в строку следователя — не дублируем
+    const org = (c.investigatorOrg || '').replace(/^В\s+/, '');
+    const inv = c.investigator || '';
+    if (org && !(inv && inv.includes(org))) lines.push(`В ${org}`);
+    lines.push(inv || ph('вставить должность, ФИО следователя'));
   }
+  lines.push(court.caseNum ? `по уголовному делу № ${court.caseNum}` : `по уголовному делу ${ph('вставить номер')}`);
   lines.push('');
-  lines.push(c.advocateGen ? `от адвоката ${c.advocateGen}` : `от адвоката ${ph('вставить ФИО адвоката')}`);
-  if (c.advocateDetails) lines.push(c.advocateDetails);
-  lines.push('');
-  lines.push(`в интересах ${c.clientStatus ? c.clientStatus + ' ' : ''}${c.clientGen || ph('вставить ФИО доверителя')}`);
-  if (c.court && c.court.caseNum) lines.push(`по уголовному делу № ${c.court.caseNum}`);
+
+  // защитник и его реквизиты
+  const status = c.clientStatus || 'обвиняемого';
+  lines.push(`от защитника ${status} ${c.clientGen || ph('вставить ФИО доверителя')}`);
+  lines.push(`${c.advocateGen || ph('вставить ФИО адвоката')}, адвоката,`);
+  lines.push(`регистрационный № ${c.advocateReg || ph('номер')} в реестре адвокатов ${c.advocateRegion || ph('субъект РФ')},`);
+  lines.push(`удостоверение № ${c.advocateCert || ph('номер')}${c.advocateCertDate ? ` от ${c.advocateCertDate}` : ` от ${ph('дата')}`},`);
+
+  // в чьих интересах и по какому обвинению (у осуждённого — «осуждённого по ст. …»)
+  const qual = (c.episodes[0] || {}).qualification || ph('часть, статья УК РФ');
+  lines.push(`действующего в защиту интересов ${c.clientGen || ph('вставить ФИО доверителя')},`);
+  lines.push(/осужд/.test(status)
+    ? `${status} по ${qual}`
+    : `${status} в совершении преступления, предусмотренного ${qual}`);
+  lines.push(`адрес для корреспонденции: ${c.advocateAddr || ph('вставить адрес')}`);
+  lines.push(`тел.: ${c.advocatePhone || ph('вставить телефон')}`);
   return lines;
+}
+
+/**
+ * Формула просительной части: статьи УПК собираются в один ряд, как в
+ * бумажном шаблоне («руководствуясь ст. 47, 53, 119–122 УПК РФ»), а не
+ * перечисляются с частями и пунктами.
+ */
+function motionPleaIntro() {
+  const norms = state.motionNorms || [];
+  const upk = [];
+  const other = [];
+  norms.forEach(n => {
+    const m = /^ст\.\s*([\d.]+)/.exec(n);
+    if (m && /УПК РФ/.test(n)) { if (!upk.includes(m[1])) upk.push(m[1]); }
+    else if (/УК РФ|Федерального закона|Правительства/.test(n) && !other.includes(n)) other.push(n);
+  });
+  // 119–122 идут блоком: это общий порядок заявления и разрешения ходатайств
+  const base = ['119', '120', '121', '122'];
+  const own = upk.filter(x => !base.includes(x)).sort((a, b) => parseFloat(a) - parseFloat(b));
+  const parts = [];
+  if (own.length || upk.some(x => base.includes(x))) {
+    parts.push(`ст. ${[...own, '119–122'].join(', ')} УПК РФ`);
+  }
+  other.slice(0, 2).forEach(o => parts.push(o));
+  return parts.length
+    ? `На основании изложенного и руководствуясь ${parts.join(', ')}, ПРОШУ:`
+    : 'На основании изложенного и руководствуясь ст. 119–122 УПК РФ, ПРОШУ:';
+}
+
+/** Блок даты и подписи — общий для всех ходатайств. */
+function mwSignHtml() {
+  const c = state.card;
+  const ph = t => `<span class="ph-mark">&lt;${t}&gt;</span>`;
+  return `<p class="mw-sign">«${ph('дата')}» ${ph('месяц')} 20${ph('год')} г.</p>` +
+    `<p class="mw-sign">Защитник ________________ / ${c.advocate || ph('Ф. И. О.')}</p>`;
 }
