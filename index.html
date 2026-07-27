@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Апелляционная жалоба — демо</title>
+  <!-- ?v= бампается при каждом пуше, чтобы браузер не держал старый кэш -->
+  <link rel="stylesheet" href="css/styles.css?v=2026-07-25-16-vt">
+</head>
+<body>
+
+  <!-- ================= Демо: выбор расклада ================= -->
+  <div class="demo-switcher">
+    <span class="demo-switcher__label">Демо · расклад:</span>
+    <div class="demo-switcher__tabs" id="demo-switcher-tabs"></div>
+    <span class="demo-switcher__hint">переключение полностью сбрасывает состояние</span>
+    <button class="demo-ai" id="demo-ai" title="Подключение нейронки (ключ хранится только в этом браузере)">ИИ: выкл</button>
+  </div>
+
+  <!-- ================= Шапка ================= -->
+  <header class="topbar">
+    <button class="icon-btn" id="btn-back" title="Назад">
+      <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <h1 class="topbar__title" id="topbar-title">Новый документ</h1>
+    <div class="topbar__spacer"></div>
+    <button class="icon-btn" id="btn-print" title="Печать">
+      <svg viewBox="0 0 24 24"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v7H6z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <button class="btn btn--dark" id="btn-download">Скачать</button>
+  </header>
+
+  <!-- ================= Основная сетка ================= -->
+  <div class="layout">
+
+    <!-- ======== Левая часть: редактор документа ======== -->
+    <main class="editor-pane">
+
+      <!-- Тулбар -->
+      <div class="toolbar">
+        <button class="icon-btn" title="Отменить">
+          <svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="icon-btn" title="Повторить">
+          <svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5M20 9H10a6 6 0 0 0 0 12h3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+
+        <span class="toolbar__divider"></span>
+
+        <button class="toolbar__select" title="Стиль текста">
+          <svg viewBox="0 0 24 24"><path d="M4 7V5h16v2M12 5v14M9 19h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Текст</span>
+          <svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+
+        <span class="toolbar__divider"></span>
+
+        <button class="toolbar__select" title="Шрифт">
+          <span class="toolbar__font-icon">T</span>
+          <span>Arial</span>
+          <svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+
+        <span class="toolbar__divider"></span>
+
+        <button class="icon-btn icon-btn--text" title="Полужирный"><b>B</b></button>
+        <button class="icon-btn icon-btn--text" title="Курсив"><i>I</i></button>
+        <button class="icon-btn icon-btn--text" title="Подчёркнутый"><u>U</u></button>
+        <button class="icon-btn" title="Выделение цветом">
+          <svg viewBox="0 0 24 24"><path d="m9 11 6-6 4 4-6 6H9v-4zM5 19h14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+
+        <span class="toolbar__divider"></span>
+
+        <button class="icon-btn" title="Маркированный список">
+          <svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="5" cy="6" r="1.3" fill="currentColor"/><circle cx="5" cy="12" r="1.3" fill="currentColor"/><circle cx="5" cy="18" r="1.3" fill="currentColor"/></svg>
+        </button>
+        <button class="icon-btn" title="Нумерованный список">
+          <svg viewBox="0 0 24 24"><path d="M10 6h10M10 12h10M10 18h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><text x="3" y="8" font-size="7" fill="currentColor" font-family="Arial">1</text><text x="3" y="14" font-size="7" fill="currentColor" font-family="Arial">2</text><text x="3" y="20" font-size="7" fill="currentColor" font-family="Arial">3</text></svg>
+        </button>
+
+        <span class="toolbar__divider"></span>
+
+        <button class="toolbar__select" title="Выравнивание">
+          <svg viewBox="0 0 24 24"><path d="M4 6h16M4 10h10M4 14h16M4 18h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <span>По левому краю</span>
+          <svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+
+        <span class="toolbar__divider"></span>
+
+        <button class="icon-btn" title="Комментарий">
+          <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="icon-btn" title="Очистить форматирование">
+          <svg viewBox="0 0 24 24"><path d="m5 13 6-9h4l-4 16M3 21h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="m16 15 5 5m0-5-5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </button>
+
+        <button class="icon-btn view-toggle is-on" id="view-toggle" title="Показаны колонки блоков — нажмите, чтобы оставить только текст документа">
+          <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M15 4v16" stroke="currentColor" stroke-width="1.7"/></svg>
+        </button>
+      </div>
+
+      <!-- Чеклист наполнения структуры документа (строка состояния) -->
+      <div class="doc-checklist" id="doc-checklist" hidden></div>
+
+      <!-- Полотно документа -->
+      <div class="doc-scroll" id="doc-scroll">
+        <div class="page">
+
+          <button class="page__add-image">
+            <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8.5" cy="10" r="1.5" fill="currentColor"/><path d="m21 16-5-5-8 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+            Добавить изображение
+          </button>
+
+          <!-- Шапка документа (адресат) -->
+          <div class="doc-header" data-block-id="header">
+            <div class="doc-header__controls">
+              <button class="icon-btn icon-btn--sm" title="Удалить">
+                <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+              </button>
+              <button class="icon-btn icon-btn--sm" title="Выровнять">
+                <svg viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              </button>
+            </div>
+            <div class="doc-header__body" id="doc-header-body" contenteditable="true">
+              <p class="placeholder">Шапка документа сформируется после выбора типа</p>
+            </div>
+          </div>
+
+          <h2 class="doc-title" id="doc-title" contenteditable="true">Новый документ</h2>
+
+          <!-- Блоки документа: рендерятся из js/app.js -->
+          <div id="doc-blocks"></div>
+
+          <!-- Просительная часть: рендерится из js/app.js -->
+          <div id="doc-pleas"></div>
+
+          <div class="doc-hint">shift + enter — создать новый блок</div>
+
+        </div>
+      </div>
+    </main>
+
+    <!-- ======== Правая часть: панель ассистента ======== -->
+    <aside class="assistant-pane">
+
+      <div class="assistant-header">
+        <a href="#" class="assistant-header__logs" id="btn-logs">show logs</a>
+        <div class="assistant-header__spacer"></div>
+        <div class="usage">
+          <span class="usage__ring" style="--pct:0"></span>
+          <span>0% на день</span>
+        </div>
+        <div class="usage">
+          <span class="usage__ring" style="--pct:1"></span>
+          <span>1% на месяц</span>
+        </div>
+      </div>
+
+      <div class="assistant-scroll" id="assistant-scroll">
+
+
+        <!-- Сообщения ассистента: рендерятся из js/app.js -->
+        <div id="assistant-feed"></div>
+
+      </div>
+
+      <!-- Ввод -->
+      <div class="assistant-input" id="assistant-input">
+        <div class="scenario-banner" id="scenario-banner">
+          <div class="scenario-banner__text">
+            <div class="scenario-banner__label">Выполняется сценарий
+              <span class="scenario-banner__step" id="scenario-banner-step" hidden></span>
+            </div>
+            <div class="scenario-banner__title" id="scenario-banner-title"></div>
+          </div>
+          <button class="scenario-banner__menu" id="scenario-banner-menu" title="Действия со сценарием">
+            <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.7" fill="currentColor"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/><circle cx="19" cy="12" r="1.7" fill="currentColor"/></svg>
+          </button>
+          <div class="scenario-banner__dropdown" id="scenario-banner-dropdown">
+            <button id="scenario-abort">Прервать сценарий</button>
+          </div>
+        </div>
+        <div class="assistant-input__context" id="input-context">
+          <!-- чип привязанного блока рендерится из js/app.js -->
+        </div>
+        <div class="assistant-input__row">
+          <textarea id="prompt-input" rows="1" placeholder="Напишите запрос или выберите действие..."></textarea>
+          <div class="assistant-input__bar">
+            <div class="assistant-input__left">
+              <div class="star-wrap">
+                <button class="icon-btn icon-btn--star" id="btn-star" title="Действия по блоку (ИИ-меню)">
+                  <svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.3L19 10l-5.1 1.7L12 17l-1.9-5.3L5 10l5.1-1.7z" fill="currentColor"/><path d="M19 15l.9 2.4L22 18l-2.1.7L19 21l-.9-2.3L16 18l2.1-.6z" fill="currentColor"/></svg>
+                </button>
+                <div class="star-menu" id="star-menu"></div>
+              </div>
+              <button class="icon-btn" id="btn-attach" title="Прикрепить файл">
+                <svg viewBox="0 0 24 24"><path d="m21 12-8.5 8.5a5 5 0 0 1-7-7L14 5a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L16 7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+            </div>
+            <button class="send-btn" id="btn-send" title="Отправить">
+              <svg viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </aside>
+  </div>
+
+  <!-- Меню действий у блока (ховер-звёздочка) -->
+  <div class="block-menu" id="block-menu" hidden></div>
+
+  <!-- Модалки (попапы 16.1 / 16.3) -->
+  <div class="modal-overlay" id="modal-overlay" hidden>
+    <div class="modal" id="modal"></div>
+  </div>
+
+  <script src="js/lines-library.js?v=2026-07-25-16-vt"></script>
+  <script src="js/prompts.js?v=2026-07-25-16-vt"></script>
+  <script src="js/llm.js?v=2026-07-25-16-vt"></script>
+  <script src="js/scenarios.js?v=2026-07-25-16-vt"></script>
+  <script src="js/app.js?v=2026-07-25-16-vt"></script>
+</body>
+</html>
