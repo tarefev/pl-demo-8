@@ -1391,7 +1391,14 @@ function pleaIntro() {
   const k = state.docType ? state.docType.key : null;
   if (k === 'appeal') return 'На основании изложенного, руководствуясь ст. 389.15, 389.20 УПК РФ, ПРОШУ:';
   if (k === 'cassation') return 'На основании изложенного, руководствуясь ст. 401.14, 401.15 УПК РФ, ПРОШУ:';
-  if (k === 'motion') return 'На основании изложенного, руководствуясь ст. 119–122 УПК РФ, ПРОШУ:';
+  if (k === 'motion') {
+    // нормы конкретного ходатайства подставляет визард
+    const norms = (state.motionNorms || []).filter(n => /УПК|УК|Федерального закона|Правительства/.test(n));
+    const uniq = [...new Set(norms)].slice(0, 4);
+    return uniq.length
+      ? `На основании изложенного, руководствуясь ${uniq.join(', ')}, ПРОШУ:`
+      : 'На основании изложенного, руководствуясь ст. 119–122 УПК РФ, ПРОШУ:';
+  }
   return 'На основании изложенного ПРОШУ:';
 }
 
@@ -2718,16 +2725,12 @@ function offerDocTypeChoices(intro) {
 }
 
 function onDocTypePicked(type) {
-  // 1.1.1 Ходатайство: второй набор чойсов
+  // Ходатайство: визард по каталогу (js/motion-wizard.js)
   if (type.key === 'motion') {
-    setStep('1.1.1');
-    offerChoices(MOTION_TYPES.map(m => ({
-      label: m,
-      onPick: () => {
-        addMessage('user', m);
-        finalizeDocType(type, `Ходатайство ${m.charAt(0).toLowerCase()}${m.slice(1)}`);
-      }
-    })), 'Какое ходатайство готовим? Выберите тип или напишите свой:');
+    state.docType = { key: 'motion', label: 'Ходатайство' };
+    state.structure = null;
+    state.scenario = null;
+    startMotionWizard();
     return;
   }
   finalizeDocType(type, type.label);
@@ -2804,56 +2807,10 @@ async function finalizeDocType(type, title) {
     return;
   }
 
-  // 2.2 ходатайство → текстовый шаблон с плейсхолдерами + сценарий 18
-  if (type.key === 'motion') {
-    insertMotionTemplate();
-    addMessage('assistant', 'В документ вставлен шаблон ходатайства — незаполненные места отмечены жёлтым.');
-    const sc = state.scenario;
-    sc.id = 'motion';
-    sc.title = 'Подготовка ходатайства';
-    sc.uninterruptible = false;
-    setStep('18');
-    awaitText('Уточните: какие обстоятельства обосновывают ходатайство и о чём просим суд?', onMotionDetails);
-    return;
-  }
+  // ходатайство идёт своим путём — визард запускается в onDocTypePicked
 
   // 2.3 другой тип → сценарий 19 → справка (сценарий 14)
   endScenario('Документ создан. Дальше можно работать командами из чата.');
-  startHelp();
-}
-
-/** Шаблон ходатайства: текст с плейсхолдерами по данным карточки (чего нет — жёлтым). */
-function insertMotionTemplate() {
-  const c = state.card;
-  const mark = t => `<span class="ph-mark">${t}</span>`;
-  const caseNum = c.court && c.court.caseNum ? `№ ${c.court.caseNum}` : mark('указать номер дела');
-  const courtName = c.court && c.court.appeal ? 'Киевского районного суда г. Симферополя' : mark('указать суд или орган');
-  const client = c.clientGen || mark('указать ФИО доверителя');
-  const qual = c.episodes[0] && c.episodes[0].qualification ? c.episodes[0].qualification : mark('указать квалификацию');
-
-  insertBlock(
-    `<p>В производстве ${courtName} находится уголовное дело ${caseNum} в отношении ${client}, обвиняемого в совершении преступления, предусмотренного ${qual}.</p>` +
-    `<p>${mark('Изложите обстоятельства, обосновывающие ходатайство')}</p>`,
-    { section: 'facts', kind: 'motion-tpl' });
-
-  insertBlock(MOTION_LAW_TEXT, { section: 'law', kind: 'law' });
-}
-
-/** Сценарий 18: детали от пользователя заполняют плейсхолдер обоснования в шаблоне. */
-async function onMotionDetails(text) {
-  await think('Генерирую текст ходатайства', 2000);
-  const filled = `${text.charAt(0).toUpperCase()}${text.slice(1)}. Изложенные обстоятельства имеют существенное значение для дела и подтверждаются его материалами (статьи 119, 120 УПК РФ).`;
-
-  const tpl = state.blocks.find(b => b.kind === 'motion-tpl');
-  if (tpl) {
-    tpl.html = tpl.html.replace(/<span class="ph-mark">Изложите обстоятельства[^<]*<\/span>/, filled);
-    renderBlocks();
-    flashBlock(tpl.id);
-  } else {
-    insertBlock(filled, { section: 'facts', kind: 'motion-facts' });
-  }
-  addPlea(PLEA_MOTION);
-  endScenario('Обоснование ходатайства заполнено, просительная часть сформирована.');
   startHelp();
 }
 
