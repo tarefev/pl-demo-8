@@ -2463,3 +2463,12 @@ body.text-only .doc-generated {
   outline: none;
 }
 .mw-free input:focus { border-color: var(--accent); }
+
+/* пометка необязательного поля в формах визарда */
+.mw-optional {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+.mw-fr__actions { margin-top: 6px; }

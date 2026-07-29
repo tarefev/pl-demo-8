@@ -323,19 +323,21 @@ function mwSyncArgsBlock(built) {
     return;
   }
 
-  const sig = JSON.stringify([ab.thesis, ab.args.map(a => a.text)]);
+  const sig = JSON.stringify([ab.lead, ab.thesis, ab.args.map(a => [a.text, a.tailMark || ''])]);
   if (!argsBlk) argsBlk = getBlock(insertBlock('', { section: 'facts', kind: 'motion-args' }));
   if (argsBlk.argsSig !== sig) {
     argsBlk.argsSig = sig;
+    argsBlk.leadTitle = ab.lead || 'Доводы';
     argsBlk.argsList = ab.args.map(a => ({ text: a.text, source: null, auto: true, poolIdx: null, grounds: (a.grounds || []).map(g => ({ ...g })) }));
     argsBlk.parts = [
-      { key: 'line', title: 'Линия защиты', html: 'Переквалификация обвинения' },
+      { key: 'line', title: 'Линия защиты', html: ab.line || argsBlk.leadTitle },
       ...(ab.thesis ? [{ key: 'thesis', title: 'Тезис', html: ab.thesis }] : []),
       { key: 'arguments', title: 'Доводы', html: argsListToHtml(argsBlk.argsList) }
     ];
     const ps = [];
     if (ab.thesis) ps.push(endDot(ab.thesis));
-    argsBlk.argsList.forEach(a => ps.push(`${endDot(a.text)}${a.grounds.length ? ` Это подтверждается: ${a.grounds.map(g => g.text).join('; ')}.` : ''}`));
+    ab.args.forEach(a => ps.push(`${endDot(a.text)}${a.tailMark ? ` ${a.tailMark}` : ''}${
+      (a.grounds || []).length ? ` Это подтверждается: ${a.grounds.map(g => g.text).join('; ')}.` : ''}`));
     argsBlk.genPs = ps;
     argsBlk.generated = ps.map(p => `<p>${p}</p>`).join('');
     argsBlk.evidence = argsBlk.evidence || [];
@@ -666,8 +668,26 @@ function mwFactsPerReason(el, s) {
   const box = document.createElement('div');
   box.className = 'mw-frs';
 
+  // введённое сразу отображается в документе (конструкторный блок оснований)
+  const collect = () => {
+    const val = {};
+    box.querySelectorAll('.mw-fr').forEach(fr => {
+      const t = fr.querySelector('.mw-input').innerText.replace(/\s+/g, ' ').trim();
+      if (t) val[fr.dataset.reason] = t;
+    });
+    return val;
+  };
+  let liveTimer = null;
+  const liveSync = immediate => {
+    clearTimeout(liveTimer);
+    liveTimer = setTimeout(() => {
+      mwCtx.answers[s.key] = collect();
+      mwSync();
+    }, immediate ? 0 : 600);
+  };
+
   if (!reasons.length) {
-    box.innerHTML = '<div class="mw-hint">Причины недопустимости не выбраны — вернитесь на шаг назад и отметьте их.</div>';
+    box.innerHTML = '<div class="mw-hint">Основания недопустимости не выбраны — вернитесь на шаг назад и отметьте их.</div>';
   }
   reasons.forEach(r => {
     const support = (typeof INADMISSIBILITY_SUPPORT !== 'undefined' ? INADMISSIBILITY_SUPPORT[r] : null) || [];
@@ -676,7 +696,8 @@ function mwFactsPerReason(el, s) {
     fr.dataset.reason = r;
     fr.innerHTML = `
       <div class="mw-fr__reason">${r}</div>
-      <div class="mw-input" contenteditable="true" data-ph="Обстоятельства по этой причине…"></div>
+      <div class="mw-input" contenteditable="true" data-ph="Обстоятельства по этому основанию…"></div>
+      <div class="mw-fr__actions"><button class="mw-add" type="button">Развернуть с помощью ИИ</button></div>
       ${support.length ? `
       <div class="mw-fr__support is-dim">
         <div class="mw-var__cap">Подтверждается</div>
@@ -684,8 +705,33 @@ function mwFactsPerReason(el, s) {
       </div>` : ''}`;
     const input = fr.querySelector('.mw-input');
     const sup = fr.querySelector('.mw-fr__support');
-    // ссылки «подтягиваются», когда обстоятельства по причине заполнены
-    if (sup) input.addEventListener('input', () => sup.classList.toggle('is-dim', !input.innerText.trim()));
+    // ссылки «подтягиваются», когда обстоятельства по основанию заполнены,
+    // а сам текст с задержкой встаёт в документ
+    input.addEventListener('input', () => {
+      if (sup) sup.classList.toggle('is-dim', !input.innerText.trim());
+      liveSync(false);
+    });
+    // «Развернуть с помощью ИИ» — заметка адвоката превращается в абзац
+    const ai = fr.querySelector('.mw-fr__actions button');
+    ai.addEventListener('click', async () => {
+      const raw = input.innerText.replace(/\s+/g, ' ').trim();
+      if (!raw) return mwWarn(el, 'Сначала кратко напишите обстоятельства — ИИ развернёт их до абзаца.');
+      ai.disabled = true; ai.textContent = 'Разворачиваю…';
+      try {
+        if (typeof LLM !== 'undefined' && LLM.enabled()) {
+          const out = await LLM.complete(mwExpandReasonPrompt(r, raw), { maxTokens: 1500 });
+          input.innerText = out.trim();
+        } else {
+          await new Promise(res => setTimeout(res, 1200));
+          input.innerText = mwExpandReasonFallback(raw);
+        }
+        if (sup) sup.classList.remove('is-dim');
+        liveSync(true);
+      } catch (err) {
+        mwWarn(el, `ИИ недоступен: ${err.message}. Текст оставлен как есть.`);
+      }
+      ai.disabled = false; ai.textContent = 'Развернуть с помощью ИИ';
+    });
     box.appendChild(fr);
   });
   el.appendChild(box);
@@ -696,16 +742,13 @@ function mwFactsPerReason(el, s) {
   let warned = false;
   ok.addEventListener('click', () => {
     if (state.busy) return;
-    const val = {};
-    box.querySelectorAll('.mw-fr').forEach(fr => {
-      const t = fr.querySelector('.mw-input').innerText.replace(/\s+/g, ' ').trim();
-      if (t) val[fr.dataset.reason] = t;
-    });
+    clearTimeout(liveTimer);
+    const val = collect();
     const missing = reasons.filter(r => !val[r]);
     if (missing.length && !warned) {
       warned = true;
       ok.textContent = 'Всё равно продолжить';
-      return mwWarn(el, `Обстоятельства не изложены: ${missing.map(m => `«${m.toLowerCase()}»`).join(', ')}. Заполните или нажмите ещё раз — в документе останутся жёлтые метки.`);
+      return mwWarn(el, `Обстоятельства не изложены: ${missing.map(m => `«${m.split(' (')[0].toLowerCase()}»`).join(', ')}. Заполните или нажмите ещё раз — в документе останутся жёлтые метки.`);
     }
     el.querySelectorAll('button, .mw-input').forEach(x => { x.disabled = true; x.contentEditable = 'false'; });
     addMessage('user', Object.keys(val).length ? `Обстоятельства изложены: ${Object.keys(val).length} из ${reasons.length}` : 'Пропустить');
@@ -713,6 +756,24 @@ function mwFactsPerReason(el, s) {
   });
   el.appendChild(ok);
   setTimeout(() => { const f = box.querySelector('.mw-input'); if (f) f.focus(); }, 50);
+}
+
+/** Промт «Развернуть с помощью ИИ» для обстоятельств по основанию недопустимости. */
+function mwExpandReasonPrompt(reason, raw) {
+  return [
+    'Ты — помощник адвоката по уголовным делам.',
+    'Разверни краткую заметку адвоката в один связный абзац официально-делового стиля для ходатайства о признании доказательства недопустимым.',
+    'Пиши от первого лица защитника, без заголовков и вводных фраз. Не выдумывай фактов, дат и номеров. Верни только текст абзаца.',
+    `Основание недопустимости: ${reason}.`,
+    `Сведения о деле:\n${caseSummaryForPrompt()}`,
+    `Заметка адвоката: «${raw}»`
+  ].join('\n');
+}
+
+/** Шаблонное развёртывание обстоятельств, когда нейросеть не подключена. */
+function mwExpandReasonFallback(raw) {
+  const t = raw.replace(/\.\s*$/, '');
+  return `${t.charAt(0).toUpperCase()}${t.slice(1)}. Указанные обстоятельства свидетельствуют о получении доказательства с существенным нарушением требований уголовно-процессуального закона, что исключает использование его в доказывании.`;
 }
 
 /**
@@ -904,8 +965,8 @@ function mwEvidence(el, s) {
     form.innerHTML = `
       <label class="mw-field"><span>Наименование *</span><input type="text" data-k="title" value="${(base && base.title) || ''}"></label>
       ${s.needPlace ? `
-      <label class="mw-field"><span>Том *</span><input type="text" data-k="volume" value="${(base && base.volume) || ''}"></label>
-      <label class="mw-field"><span>Листы дела *</span><input type="text" data-k="sheets" value="${(base && base.sheets) || ''}"></label>` : ''}
+      <label class="mw-field"><span>Том <i class="mw-optional">необязательное поле</i></span><input type="text" data-k="volume" value="${(base && base.volume) || ''}"></label>
+      <label class="mw-field"><span>Листы дела <i class="mw-optional">необязательное поле</i></span><input type="text" data-k="sheets" value="${(base && base.sheets) || ''}"></label>` : ''}
       ${needSource ? `
       <label class="mw-field"><span>Способ получения *</span>
         <select data-k="obtainedBy">
@@ -924,14 +985,13 @@ function mwEvidence(el, s) {
     ok.addEventListener('click', () => {
       const val = { ...(base || {}) };
       form.querySelectorAll('[data-k]').forEach(i => { if (i.value.trim()) val[i.dataset.k] = i.value.trim(); });
-      const need = ['title', ...(s.needPlace ? ['volume', 'sheets'] : []), ...(needSource ? ['obtainedBy'] : [])];
+      // том и листы дела — необязательные поля, продолжить можно без них
+      const need = ['title', ...(needSource ? ['obtainedBy'] : [])];
       const missing = need.filter(k => !val[k]);
       // первое нажатие с пробелами — предупреждаем и даём заполнить; второе — идём дальше с жёлтой меткой
       if (missing.length && !warned) {
         warned = true;
-        mwWarn(el, s.needPlace && (missing.includes('volume') || missing.includes('sheets'))
-          ? 'Том и листы дела обязательны: без точной ссылки суд не обязан искать доказательство. Заполните поля или нажмите ещё раз — в документе останется жёлтая метка.'
-          : 'Заполните обязательные поля или нажмите ещё раз — в документе останется жёлтая метка.');
+        mwWarn(el, 'Заполните обязательные поля или нажмите ещё раз — в документе останется жёлтая метка.');
         ok.textContent = 'Всё равно продолжить';
         return;
       }

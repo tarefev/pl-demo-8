@@ -212,7 +212,7 @@ function blockLead(block) {
   const sec = block.section || 'defense';
   if (block.kind === 'grounds') return 'Основания для отмены';
   // блоки визарда ходатайств со своими именами
-  if (block.kind === 'motion-args') return 'Доводы переквалификации';
+  if (block.kind === 'motion-args') return block.leadTitle || 'Доводы';
   if (block.kind === 'motion-body2') return 'Правовое обоснование';
   if (block.kind === 'motion-att') return 'Приложение и подпись';
   if (sec !== 'defense' || !(block.parts && block.parts.length)) {
