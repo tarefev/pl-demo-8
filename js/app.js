@@ -1184,7 +1184,8 @@ function renderBlocks() {
     const el = document.createElement('div');
     // готовность блока показывает вертикальная полоса у текста (галок и меток нет)
     el.className = 'doc-block' + (block.id === state.activeBlockId ? ' is-active' : '') +
-      (issuesOk ? ' is-ok' : ' is-warn');
+      (issuesOk ? ' is-ok' : ' is-warn') +
+      (block.kind ? ' doc-block--' + block.kind : '');
     el.dataset.blockId = block.id;
     el.title = issuesOk ? '' : issues.join('; ');
 

@@ -2472,3 +2472,11 @@ body.text-only .doc-generated {
   margin-left: 4px;
 }
 .mw-fr__actions { margin-top: 6px; }
+
+/* --- Конструктор в ходатайствах: редактируемые поля набираются TNR 12 pt, --- */
+/* управляющие подписи, бейджи и кнопки остаются в системном шрифте */
+.doc-block--motion-args .doc-constructor [contenteditable="true"] {
+  font-family: "Times New Roman", "Liberation Serif", Georgia, serif;
+  font-size: 12pt;
+  line-height: 1.5;
+}
