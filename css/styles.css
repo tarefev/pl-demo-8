@@ -258,9 +258,10 @@ button {
 .doc-block__content p:last-child, .doc-generated__body p:last-child { margin-bottom: 0; }
 
 /* добавленные на текущем шаге слова — маркер строго по тексту, без плашки
-   на весь абзац; пометка снимается со следующим шагом */
+   на весь абзац; пометка снимается со следующим шагом. Сиреневый: голубой
+   путался с выделением текста, жёлтый занят метками незаполненного */
 .doc-added {
-  background: #c7e8ff;
+  background: #e6d9fa;
   border-radius: 2px;
   padding: 0 1px;
   box-decoration-break: clone;
