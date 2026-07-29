@@ -321,10 +321,10 @@ button {
 /* --- Заголовок документа --- */
 .doc-title {
   text-align: center;
-  /* наименование документа — тем же 14-м кеглем, полужирным, как в шаблоне */
-  font-size: 14pt;
+  /* наименование документа — чуть крупнее текста, полужирным, с воздухом до текста */
+  font-size: 16pt;
   font-weight: 700;
-  margin: 6px 0 4px;
+  margin: 10px 0 22px;
   outline: none;
 }
 
@@ -2358,3 +2358,70 @@ body.text-only .doc-generated {
 
 /* дата и подпись под ходатайством */
 .mw-sign { margin-top: 14px; }
+
+/* --- Шаг «Квалификация»: варианты переквалификации с тезисом и доводами в чате --- */
+.mw-req__sub { font-weight: 700; font-size: 13px; margin: 12px 0 2px; }
+.mw-var {
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  margin-top: 8px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.mw-var__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.mw-var__head:hover { background: var(--accent-soft-2); }
+.mw-var__head:disabled { cursor: default; }
+.mw-var__to { font-weight: 700; font-size: 13px; }
+.mw-var__short { color: var(--text-muted); font-size: 12px; }
+.mw-var.is-open { border-color: var(--accent); }
+.mw-var.is-open .mw-var__head { background: var(--accent-soft); }
+.mw-var__body { display: none; padding: 10px 12px 12px; }
+.mw-var.is-open .mw-var__body { display: block; }
+.mw-var__cap {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-muted);
+  margin: 10px 0 4px;
+}
+.mw-var__cap:first-child { margin-top: 0; }
+.mw-thesis {
+  font-size: 13px;
+  line-height: 1.5;
+  outline: none;
+  border-left: 2px solid var(--accent);
+  padding-left: 8px;
+}
+.mw-arg { margin: 6px 0 10px; }
+/* отключённый довод гаснет, но остаётся на месте — можно вернуть */
+.mw-arg:has(> .mw-arg__row input:not(:checked)) { opacity: .45; }
+.mw-arg__row { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+.mw-arg__row input { margin-top: 3px; flex: none; }
+.mw-arg__text { font-size: 13px; line-height: 1.5; outline: none; }
+.mw-arg__grounds { margin: 4px 0 0 24px; display: flex; flex-direction: column; gap: 3px; }
+.mw-gr { display: flex; gap: 6px; align-items: baseline; font-size: 12px; color: #4b5160; }
+.mw-gb {
+  flex: none;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  border-radius: 4px;
+  padding: 1px 5px;
+  background: #f1f2f6;
+  color: #6b7280;
+}
+.mw-gb--evidence { background: #e6f6f8; color: #0e7787; }
+.mw-gb--norm { background: var(--accent-soft); color: var(--accent); }
+.mw-gb--practice { background: #eaf6ec; color: #2e7d43; }

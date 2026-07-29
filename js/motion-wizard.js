@@ -132,7 +132,7 @@ function mwRunStep() {
   const render = {
     'choice': mwChoice, 'choice-group': mwChoiceGroup, 'multi': mwMulti,
     'multi-group': mwMultiGroup, 'text': mwText, 'form': mwForm,
-    'evidence': mwEvidence, 'confirm': mwConfirm
+    'evidence': mwEvidence, 'confirm': mwConfirm, 'requalify': mwRequalify
   }[s.type];
   if (render) render(el, s);
   scrollFeed();
@@ -244,7 +244,7 @@ function mwMarkAdded(built, headerLines, bodyBlock) {
  */
 function mwLockPast() {
   document.querySelectorAll('#assistant-feed .msg').forEach(msg => {
-    msg.querySelectorAll('.mw-back, .mw-ok, .mw-add, .mw-item, .mw-all, .mw-check input, .mw-input, .mw-field input, .mw-field select, .mw-chip button')
+    msg.querySelectorAll('.mw-back, .mw-ok, .mw-add, .mw-item, .mw-all, .mw-check input, .mw-input, .mw-field input, .mw-field select, .mw-chip button, .mw-var__head, .mw-arg__row input, .mw-thesis, .mw-arg__text')
       .forEach(x => { x.disabled = true; if (x.isContentEditable) x.contentEditable = 'false'; });
   });
 }
@@ -520,6 +520,119 @@ function mwText(el, s) {
   el.appendChild(box);
   el.appendChild(actions);
   setTimeout(() => input.focus(), 50);
+}
+
+/**
+ * Шаг «Квалификация» переквалификации: вменённая статья — свободный ввод,
+ * целевая — варианты из таблицы переквалификации (REQUALIFY_TABLE). У варианта
+ * раскрываются тезис и доводы с основаниями — доказательством, нормой или
+ * практикой, как в конструкторе апелляции, но прямо в чате. Доводы можно
+ * отключать, тезис и формулировки — править. Обоснование собирается из них.
+ */
+function mwRequalify(el, s) {
+  const box = document.createElement('div');
+  box.className = 'mw-req';
+  const preset = (state.card.episodes[0] || {}).qualification || '';
+  box.innerHTML = `
+    <label class="mw-field"><span>Вменённая статья</span><input type="text" data-k="from" value="${preset}"></label>
+    <div class="mw-req__sub">Статья, на которую просим переквалифицировать</div>
+    <div class="mw-req__vars"></div>`;
+  el.appendChild(box);
+
+  const fromInput = box.querySelector('[data-k="from"]');
+  const varsEl = box.querySelector('.mw-req__vars');
+  let opts = [];
+  let picked = null; // объект таблицы либо { manual: true }
+
+  const renderVars = () => {
+    opts = findRequalifyOptions(fromInput.value);
+    picked = null;
+    varsEl.innerHTML = opts.map(o => `
+      <div class="mw-var" data-id="${o.id}">
+        <button class="mw-var__head" type="button">
+          <span class="mw-var__to">${o.to}</span>
+          <span class="mw-var__short">${o.short}</span>
+        </button>
+        <div class="mw-var__body">
+          <div class="mw-var__cap">Тезис</div>
+          <div class="mw-thesis" contenteditable="true">${o.thesis}</div>
+          <div class="mw-var__cap">Доводы</div>
+          ${o.args.map((a, ai) => `
+            <div class="mw-arg" data-ai="${ai}">
+              <label class="mw-arg__row">
+                <input type="checkbox" checked>
+                <span class="mw-arg__text" contenteditable="true">${a.text}</span>
+              </label>
+              <div class="mw-arg__grounds">${a.grounds.map(g =>
+                `<div class="mw-gr"><span class="mw-gb mw-gb--${g.type}">${GROUND_LABELS[g.type] || g.type}</span><span>${g.text}</span></div>`).join('')}</div>
+            </div>`).join('')}
+        </div>
+      </div>`).join('') + `
+      <div class="mw-var mw-var--manual">
+        <button class="mw-var__head" type="button">
+          <span class="mw-var__to">Другая статья</span>
+          <span class="mw-var__short">ввести вручную</span>
+        </button>
+        <div class="mw-var__body">
+          <label class="mw-field"><span>Статья, на которую просим переквалифицировать</span><input type="text" data-k="to"></label>
+          <div class="mw-hint">Для статьи вне таблицы тезис и доводы адвокат формулирует сам — в документе останется жёлтая метка.</div>
+        </div>
+      </div>`;
+
+    // статью таблица не знает — сразу раскрываем ручной ввод
+    if (!opts.length) {
+      varsEl.querySelector('.mw-var--manual').classList.add('is-open');
+      picked = { manual: true };
+    }
+    varsEl.querySelectorAll('.mw-var__head').forEach(h => h.addEventListener('click', () => {
+      if (h.disabled) return;
+      const v = h.closest('.mw-var');
+      varsEl.querySelectorAll('.mw-var').forEach(x => x.classList.toggle('is-open', x === v));
+      picked = v.classList.contains('mw-var--manual') ? { manual: true } : opts.find(o => o.id === v.dataset.id);
+      scrollFeed();
+    }));
+  };
+  renderVars();
+  fromInput.addEventListener('input', renderVars);
+
+  const ok = document.createElement('button');
+  ok.className = 'mw-ok'; ok.type = 'button';
+  ok.textContent = 'Готово';
+  let warned = false;
+  ok.addEventListener('click', () => {
+    if (state.busy) return;
+    const from = fromInput.value.trim();
+    const manualTo = (varsEl.querySelector('.mw-var--manual input') || {}).value || '';
+    const hasPick = picked && (!picked.manual || manualTo.trim());
+    if ((!from || !hasPick) && !warned) {
+      warned = true;
+      ok.textContent = 'Всё равно продолжить';
+      return mwWarn(el, 'Выберите вариант переквалификации из таблицы или укажите свою статью. Либо нажмите ещё раз — в документе останутся жёлтые метки.');
+    }
+
+    let ans = { from, to: '', thesis: '', args: [] };
+    if (picked && picked.manual) {
+      ans.to = manualTo.trim();
+    } else if (picked) {
+      const openVar = varsEl.querySelector('.mw-var.is-open');
+      ans.to = picked.to;
+      ans.thesis = openVar.querySelector('.mw-thesis').innerText.replace(/\s+/g, ' ').trim();
+      ans.args = [...openVar.querySelectorAll('.mw-arg')]
+        .filter(a => a.querySelector('input').checked)
+        .map(a => ({
+          text: a.querySelector('.mw-arg__text').innerText.replace(/\s+/g, ' ').trim(),
+          grounds: picked.args[+a.dataset.ai].grounds
+        }))
+        .filter(a => a.text);
+    }
+    el.querySelectorAll('button, input, [contenteditable]').forEach(x => {
+      x.disabled = true;
+      if (x.isContentEditable) x.contentEditable = 'false';
+    });
+    addMessage('user', `${from || '—'} → ${ans.to || '—'}${ans.args.length ? ` · доводов: ${ans.args.length}` : ''}`);
+    mwNext(ans, s.key);
+  });
+  el.appendChild(ok);
 }
 
 function mwForm(el, s) {

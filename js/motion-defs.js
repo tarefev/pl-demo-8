@@ -494,26 +494,35 @@ const MOTION_DEFS = {
   requalify: {
     title: () => 'Ходатайство о переквалификации обвинения',
     steps: [
-      { type: 'form', key: 'qual', q: 'Квалификация', fields: [
-        { key: 'from', label: 'Вменённая статья', preset: () => (state.card.episodes[0] || {}).qualification || '' },
-        { key: 'to', label: 'Статья, на которую просим переквалифицировать' }
-      ] },
+      // вменённая статья — свободный ввод; целевая — варианты из таблицы
+      // переквалификации, у каждого тезис и доводы с основаниями (в чате);
+      // обоснование собирается из них, отдельный шаг «обоснуйте» не нужен
+      { type: 'requalify', key: 'qual', q: 'Квалификация',
+        hint: 'Варианты переквалификации — из таблицы, с тезисом и доводами. Довод можно отключить, тезис и формулировки — поправить.' },
       { type: 'text', key: 'plot', q: 'Что вменяется по предъявленному обвинению? Проверьте фабулу и при необходимости сократите.',
-        preset: () => (state.card.episodes[0] || {}).text || '' },
-      { type: 'text', key: 'why', q: 'Обоснуйте, почему действия подлежат иной квалификации.', ai: true }
+        preset: () => (state.card.episodes[0] || {}).text || '' }
     ],
     build: ctx => {
       const c = motionCase();
       const q = ctx.answers.qual || {};
+      const args = q.args || [];
       const body = [
         ...motionIntro(ctx, { charged: true }),
         `Согласно предъявленному обвинению ${c.clientDat} вменяется в вину следующее: ${ctx.answers.plot ? endDot(ctx.answers.plot) : mMark('изложить фабулу обвинения')}`,
-        'Полагаю, что данная квалификация деяния является ошибочной по следующим основаниям.',
-        mText(ctx.answers.why, 'изложить обоснование переквалификации'),
+        'Полагаю, что данная квалификация деяния является ошибочной по следующим основаниям.'
+      ];
+      // обоснование — из тезиса и доводов, отмеченных на шаге «Квалификация»
+      if (q.thesis) body.push(endDot(q.thesis));
+      args.forEach(a => {
+        const gr = (a.grounds || []).map(g => g.text).join('; ');
+        body.push(`${endDot(a.text)}${gr ? ` Это подтверждается: ${gr}.` : ''}`);
+      });
+      if (!q.thesis && !args.length) body.push(mMark('изложить доводы переквалификации'));
+      body.push(
         `Изложенное свидетельствует о том, что действия подзащитного подлежат квалификации по ${mVal(q.to, 'указать статью')}.`,
         NQ.art73_1,
         ctx.stage === 'court' ? NQ.art252_2 : NQ.art175
-      ];
+      );
       const plea = [
         `Переквалифицировать действия ${c.client} с ${mVal(q.from, 'указать статью')} на ${mVal(q.to, 'указать статью')}.`
       ];
@@ -531,7 +540,8 @@ const MOTION_DEFS = {
         norms: [...(MOTION_NORMS.requalify[ctx.stage === 'court' ? 'court' : 'inv']), ...MOTION_NORMS.common],
         checklist: [
           { label: 'Указаны обе квалификации', ok: !!(q.from && q.to) },
-          { label: 'Изложено обоснование', ok: !!(ctx.answers.why || '').trim() }
+          { label: 'Сформированы тезис и доводы переквалификации', ok: !!(q.thesis || args.length) },
+          { label: 'Фабула обвинения проверена', ok: !!(ctx.answers.plot || '').trim() }
         ]
       };
     }
