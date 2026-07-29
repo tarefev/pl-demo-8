@@ -178,7 +178,8 @@ function mwSync() {
   applyDocTitle(title);
   state.docType = { key: 'motion', label: title };
   state.motionNorms = built.norms;
-  renderDocHeader(mwHeaderLines(), { silent: true });
+  const headerLines = mwHeaderLines();
+  renderDocHeader(headerLines, { silent: true });
 
   // мотивировочная часть — один блок, обновляем на месте, чтобы не мигал весь документ
   const html = built.body.map(p => `<p>${p}</p>`).join('');
@@ -203,6 +204,38 @@ function mwSync() {
   renderPleas();
   updateChecklist();
   if (changed && body) flashBlock(body.id);
+  mwMarkAdded(built, headerLines, body);
+}
+
+/**
+ * Подсветка добавленного на текущем шаге: сравниваем сборку с предыдущей и
+ * помечаем новые строки шапки, абзацы, пункты просьбы и приложения зелёным.
+ * На следующем шаге документ пересобирается — прежние пометки гаснут сами.
+ */
+function mwMarkAdded(built, headerLines, bodyBlock) {
+  const prev = mwCtx.prevSnap;
+  mwCtx.prevSnap = {
+    header: headerLines.slice(),
+    body: built.body.slice(),
+    pleas: state.pleas.slice(),
+    att: (built.attachments || []).slice()
+  };
+  if (!prev) return; // первая сборка — каркас целиком не подсвечиваем
+
+  const mark = (nodes, items, prevList) => {
+    const seen = new Set(prevList);
+    nodes.forEach((n, i) => {
+      const v = items[i];
+      if (v && String(v).trim() && !seen.has(v)) n.classList.add('doc-added');
+    });
+  };
+  mark([...document.querySelectorAll('#doc-header-body p')], headerLines, prev.header);
+  const bodyEl = bodyBlock && document.querySelector(`.doc-block[data-block-id="${bodyBlock.id}"] .doc-block__content`);
+  if (bodyEl) mark([...bodyEl.children].filter(n => n.tagName === 'P'), built.body, prev.body);
+  mark([...document.querySelectorAll('#doc-pleas .doc-pleas li')], state.pleas, prev.pleas);
+  const att = state.blocks.find(b => b.kind === 'motion-att');
+  const attEl = att && document.querySelector(`.doc-block[data-block-id="${att.id}"] .doc-block__content`);
+  if (attEl) mark([...attEl.querySelectorAll('ol > li')], built.attachments || [], prev.att);
 }
 
 /**
@@ -429,6 +462,31 @@ function mwText(el, s) {
   const actions = document.createElement('div');
   actions.className = 'mw-actions';
 
+  if (s.aiExpand) {
+    // «Развернуть с помощью ИИ»: краткая заметка адвоката → абзац для ходатайства
+    const ai = document.createElement('button');
+    ai.className = 'mw-add'; ai.type = 'button';
+    ai.textContent = 'Развернуть с помощью ИИ';
+    ai.addEventListener('click', async () => {
+      const raw = input.innerText.replace(/\s+/g, ' ').trim();
+      if (!raw) return mwWarn(el, 'Сначала кратко напишите пояснение — ИИ развернёт его до абзаца.');
+      ai.disabled = true; ai.textContent = 'Разворачиваю…';
+      try {
+        if (typeof LLM !== 'undefined' && LLM.enabled()) {
+          const out = await LLM.complete(mwExpandPrompt(s, raw), { maxTokens: 1500 });
+          input.innerText = out.trim();
+        } else {
+          await new Promise(r => setTimeout(r, 1200));
+          input.innerText = mwExpandFallback(raw);
+        }
+      } catch (err) {
+        mwWarn(el, `ИИ недоступен: ${err.message}. Текст оставлен как есть.`);
+      }
+      ai.disabled = false; ai.textContent = 'Развернуть с помощью ИИ';
+    });
+    actions.appendChild(ai);
+  }
+
   if (s.ai && typeof LLM !== 'undefined') {
     const ai = document.createElement('button');
     ai.className = 'mw-add'; ai.type = 'button';
@@ -638,11 +696,30 @@ ${caseSummaryForPrompt()}
 переданных данных; пиши от стороны защиты.`;
 }
 
+/** Промт «Развернуть с помощью ИИ»: краткое пояснение адвоката → абзац ходатайства. */
+function mwExpandPrompt(step, raw) {
+  const mats = ((mwCtx.answers || {}).materials || []).join('; ');
+  return [
+    'Ты — помощник адвоката по уголовным делам.',
+    'Разверни краткое пояснение адвоката в один связный абзац официально-делового стиля для ходатайства об ознакомлении с материалами уголовного дела.',
+    'Пиши от первого лица защитника, без заголовков и вводных фраз. Не выдумывай фактов, дат и номеров. Верни только текст абзаца.',
+    mats ? `Выбранные материалы: ${mats}.` : '',
+    `Сведения о деле:\n${caseSummaryForPrompt()}`,
+    `Пояснение адвоката: «${raw}»`
+  ].filter(Boolean).join('\n');
+}
+
+/** Шаблонное развёртывание пояснения, когда нейросеть не подключена. */
+function mwExpandFallback(raw) {
+  const t = raw.replace(/\.\s*$/, '');
+  return `${t.charAt(0).toUpperCase()}${t.slice(1)}. Ознакомление с указанными материалами имеет существенное значение для осуществления защиты: без него сторона защиты лишена возможности проверить полноту и допустимость собранных по делу доказательств и сформировать позицию по делу.`;
+}
+
 /* ================= Предпросмотр и вставка ================= */
 
 function mwPreview() {
   setStep('М.Ф');
-  mwSync();                       // финальная пересборка
+  // документ уже пересобран в mwNext; повторный sync погасил бы подсветку последнего шага
   const built = mwCtx.built;
   const title = mwCtx.def.title(mwCtx);
 
@@ -685,6 +762,8 @@ function mwPreview() {
 
 /** Завершение: документ уже в редакторе, остаётся зафиксировать результат. */
 function mwFinish(built) {
+  // визард завершён — зелёные пометки «добавлено на шаге» больше не нужны
+  document.querySelectorAll('.doc-added').forEach(x => x.classList.remove('doc-added'));
   const gaps = built.checklist.filter(c => !c.ok).length;
   endScenario(gaps
     ? `Ходатайство собрано. Осталось заполнить ${gaps} ${gaps === 1 ? 'пункт' : 'пункта(ов)'} — они отмечены жёлтым в документе.`

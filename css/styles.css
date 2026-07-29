@@ -241,13 +241,33 @@ button {
   margin: 0 auto;
   position: relative;
   padding-top: 28px;
-  /* текст документа крупнее интерфейсного на 2 единицы */
-  font-size: 16px;
+  /* текст документа — как в подаваемых в суд документах: Times New Roman 14 pt */
+  font-family: "Times New Roman", "Liberation Serif", Georgia, serif;
+  font-size: 14pt;
+}
+
+/* интерфейсные элементы на полотне остаются в системном шрифте */
+.page__add-image, .doc-info, .doc-act, .doc-constructor, .doc-ph,
+.doc-hint, .doc-insert, .doc-add-block, .doc-empty, .doc-stale {
+  font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+}
+
+/* абзацы внутри блока разделяются явно, как в напечатанном документе */
+.doc-block__content, .doc-generated__body { line-height: 1.6; }
+.doc-block__content p, .doc-generated__body p { margin: 0 0 14px; }
+.doc-block__content p:last-child, .doc-generated__body p:last-child { margin-bottom: 0; }
+
+/* добавленный на текущем шаге текст; пометка снимается со следующим шагом */
+.doc-added {
+  background: #e2f2e0;
+  box-shadow: 0 0 0 2px #e2f2e0;
+  border-radius: 3px;
 }
 
 /* элементы вне блоков выравниваются по текстовой колонке (отступы под оба столбца) */
-.page > :not(#doc-blocks):not(#doc-pleas),
+.page > :not(#doc-blocks):not(#doc-pleas):not(#doc-tail),
 #doc-blocks > :not(.doc-block),
+#doc-tail > :not(.doc-block),
 #doc-pleas > * {
   margin-left: var(--pad-l);
   margin-right: var(--pad-r);
@@ -301,7 +321,8 @@ button {
 /* --- Заголовок документа --- */
 .doc-title {
   text-align: center;
-  font-size: 21px;
+  /* наименование документа — тем же 14-м кеглем, полужирным, как в шаблоне */
+  font-size: 14pt;
   font-weight: 700;
   margin: 6px 0 4px;
   outline: none;

@@ -15,6 +15,8 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const switcherTabsEl = $('#demo-switcher-tabs');
 const docBlocksEl = $('#doc-blocks');
 const docPleasEl = $('#doc-pleas');
+// хвост документа после просительной части: приложение, дата и подпись
+const docTailEl = $('#doc-tail');
 const feedEl = $('#assistant-feed');
 const assistantScrollEl = $('#assistant-scroll');
 const contextEl = $('#input-context');
@@ -1165,6 +1167,7 @@ function toggleConstructor(block) {
 
 function renderBlocks() {
   docBlocksEl.innerHTML = '';
+  docTailEl.innerHTML = '';
   let counter = 0;
 
   const renderBlockEl = block => {
@@ -1306,7 +1309,8 @@ function renderBlocks() {
       setActiveBlock(block.id);
       if (state.activeSubpart && state.activeSubpart.blockId === block.id) setActiveSubpart(null);
     });
-    docBlocksEl.appendChild(el);
+    // приложение с датой и подписью идёт после просительной части — в хвост документа
+    (block.kind === 'motion-att' ? docTailEl : docBlocksEl).appendChild(el);
   };
 
   // точка вставки нового блока между блоками (появляется при наведении, «+» слева)
@@ -1348,7 +1352,8 @@ function renderBlocks() {
   SECTION_ORDER.forEach(sec => {
     const secBlocks = state.blocks.filter(b => (b.section || 'defense') === sec);
     const ph = state.structure.find(p => p.kind === sec);
-    if (secBlocks.length) secBlocks.forEach(b => { renderBlockEl(b); addInsertZone(b); });
+    // у хвостового блока (приложение) точка вставки не нужна — он вне общего потока
+    if (secBlocks.length) secBlocks.forEach(b => { renderBlockEl(b); if (b.kind !== 'motion-att') addInsertZone(b); });
     else if (ph && !ph.template) docBlocksEl.appendChild(buildPlaceholder(ph));
   });
   appendAddBlockButton();
