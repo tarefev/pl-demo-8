@@ -323,25 +323,40 @@ function mwSyncArgsBlock(built) {
     return;
   }
 
-  const sig = JSON.stringify([ab.lead, ab.thesis, ab.args.map(a => [a.text, a.tailMark || ''])]);
+  const sig = JSON.stringify([ab.lead, ab.thesis, ab.args.map(a => [a.srcKey || '', a.text, a.tailMark || ''])]);
   if (!argsBlk) argsBlk = getBlock(insertBlock('', { section: 'facts', kind: 'motion-args' }));
   if (argsBlk.argsSig !== sig) {
     argsBlk.argsSig = sig;
     argsBlk.leadTitle = ab.lead || 'Доводы';
-    argsBlk.argsList = ab.args.map(a => ({ text: a.text, source: null, auto: true, poolIdx: null, grounds: (a.grounds || []).map(g => ({ ...g })) }));
+    // мерж по стабильному ключу: у довода, который уже был в блоке, сохраняются
+    // правки оснований, сделанные слева (удалённые и добавленные нормы,
+    // практика, доказательства) — пересборка галок в чате их не затирает
+    const old = argsBlk.argsList || [];
+    const list = ab.args.map(a => {
+      const prev = a.srcKey ? old.find(o => o.srcKey === a.srcKey) : null;
+      return {
+        text: a.text, srcKey: a.srcKey || null, tailMark: a.tailMark || '',
+        source: null, auto: true, poolIdx: null,
+        grounds: prev ? prev.grounds : (a.grounds || []).map(g => ({ ...g }))
+      };
+    });
+    // доводы, добавленные адвокатом вручную слева, остаются в конце
+    old.filter(o => o.auto === false && (o.text || '').trim()).forEach(o => list.push(o));
+    argsBlk.argsList = list;
     argsBlk.parts = [
       { key: 'line', title: 'Линия защиты', html: ab.line || argsBlk.leadTitle },
       ...(ab.thesis ? [{ key: 'thesis', title: 'Тезис', html: ab.thesis }] : []),
-      { key: 'arguments', title: 'Доводы', html: argsListToHtml(argsBlk.argsList) }
+      { key: 'arguments', title: 'Доводы', html: argsListToHtml(list) }
     ];
+    // текст блока — по фактическому составу после мержа
     const ps = [];
     if (ab.thesis) ps.push(endDot(ab.thesis));
-    ab.args.forEach(a => ps.push(`${endDot(a.text)}${a.tailMark ? ` ${a.tailMark}` : ''}${
-      (a.grounds || []).length ? ` Это подтверждается: ${a.grounds.map(g => g.text).join('; ')}.` : ''}`));
+    list.forEach(a => ps.push(`${endDot(a.text)}${a.tailMark ? ` ${a.tailMark}` : ''}${
+      (a.grounds || []).length ? ` Это подтверждается: ${a.grounds.map(g => `${g.text}${g.evidence ? ' (' + g.evidence + ')' : ''}`).join('; ')}.` : ''}`));
     argsBlk.genPs = ps;
     argsBlk.generated = ps.map(p => `<p>${p}</p>`).join('');
     argsBlk.evidence = argsBlk.evidence || [];
-    argsBlk.constructorDone = true;
+    argsBlk.constructorDone = argsBlk.constructorDone !== false;
     argsBlk.dirty = false;
   }
 
@@ -814,7 +829,10 @@ function mwRequalify(el, s) {
       .filter(a => a.querySelector('input').checked)
       .map(a => ({
         text: a.querySelector('.mw-arg__text').innerText.replace(/\s+/g, ' ').trim(),
-        grounds: picked.args[+a.dataset.ai].grounds
+        grounds: picked.args[+a.dataset.ai].grounds,
+        // стабильный ключ довода: по нему при пересборке сохраняются правки
+        // оснований, сделанные слева в конструкторе
+        srcKey: `${picked.id}:${a.dataset.ai}`
       }))
       .filter(a => a.text);
     return ans;

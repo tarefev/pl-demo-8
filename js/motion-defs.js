@@ -997,7 +997,8 @@ function buildInadmissible(ctx, inCourt) {
     return {
       text: t ? `${endDot(r)} ${endDot(t.charAt(0).toUpperCase() + t.slice(1))}` : endDot(r),
       tailMark: t ? '' : mMark('изложить обстоятельства по этому основанию'),
-      grounds: (typeof INADMISSIBILITY_SUPPORT !== 'undefined' ? INADMISSIBILITY_SUPPORT[r] : null) || []
+      grounds: (typeof INADMISSIBILITY_SUPPORT !== 'undefined' ? INADMISSIBILITY_SUPPORT[r] : null) || [],
+      srcKey: r
     };
   });
   if (!reasons.length) body.push(mMark('выбрать основания недопустимости и изложить обстоятельства'), ...after);
