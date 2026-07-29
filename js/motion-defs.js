@@ -510,23 +510,21 @@ const MOTION_DEFS = {
       const c = motionCase();
       const q = ctx.answers.qual || {};
       const args = q.args || [];
+      const hasArgs = !!(q.thesis || args.length);
       const body = [
         ...motionIntro(ctx, { charged: true }),
         `Согласно предъявленному обвинению ${c.clientDat} вменяется в вину следующее: ${ctx.answers.plot ? endDot(ctx.answers.plot) : mMark('изложить фабулу обвинения')}`,
         'Полагаю, что данная квалификация деяния является ошибочной по следующим основаниям.'
       ];
-      // обоснование — из тезиса и доводов, отмеченных на шаге «Квалификация»
-      if (q.thesis) body.push(endDot(q.thesis));
-      args.forEach(a => {
-        const gr = (a.grounds || []).map(g => g.text).join('; ');
-        body.push(`${endDot(a.text)}${gr ? ` Это подтверждается: ${gr}.` : ''}`);
-      });
-      if (!q.thesis && !args.length) body.push(mMark('изложить доводы переквалификации'));
-      body.push(
+      // тезис и доводы живут в отдельном конструкторном блоке (argsBlock) —
+      // с ним адвокат работает слева, как с блоком апелляционной жалобы;
+      // вывод и цитаты норм идут следом отдельным блоком (bodyAfter)
+      const after = [
         `Изложенное свидетельствует о том, что действия подзащитного подлежат квалификации по ${mVal(q.to, 'указать статью')}.`,
         NQ.art73_1,
         ctx.stage === 'court' ? NQ.art252_2 : NQ.art175
-      );
+      ];
+      if (!hasArgs) body.push(mMark('изложить доводы переквалификации'), ...after);
       const plea = [
         `Переквалифицировать действия ${c.client} с ${mVal(q.from, 'указать статью')} на ${mVal(q.to, 'указать статью')}.`
       ];
@@ -537,6 +535,8 @@ const MOTION_DEFS = {
 
       return {
         body, plea,
+        bodyAfter: hasArgs ? after : null,
+        argsBlock: hasArgs ? { thesis: q.thesis || '', args } : null,
         attachments: [
           `Документы, подтверждающие доводы о неправильной квалификации, — на ${mMark('количество')} л. в 1 экз.`,
           orderAtt()
@@ -544,7 +544,7 @@ const MOTION_DEFS = {
         norms: [...(MOTION_NORMS.requalify[ctx.stage === 'court' ? 'court' : 'inv']), ...MOTION_NORMS.common],
         checklist: [
           { label: 'Указаны обе квалификации', ok: !!(q.from && q.to) },
-          { label: 'Сформированы тезис и доводы переквалификации', ok: !!(q.thesis || args.length) },
+          { label: 'Сформированы тезис и доводы переквалификации', ok: hasArgs },
           { label: 'Фабула обвинения проверена', ok: !!(ctx.answers.plot || '').trim() }
         ]
       };

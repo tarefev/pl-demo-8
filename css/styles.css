@@ -2443,3 +2443,23 @@ body.text-only .doc-generated {
 .mw-fr__support { margin-top: 8px; transition: opacity .25s; }
 .mw-fr__support.is-dim { opacity: .45; }
 .mw-fr__support .mw-gr { margin-top: 3px; }
+
+/* свободный ввод внутри раздела двухуровневого списка */
+.mw-free {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-strong);
+}
+.mw-free input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 6px 9px;
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+.mw-free input:focus { border-color: var(--accent); }

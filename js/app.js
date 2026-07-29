@@ -122,7 +122,8 @@ function blockIssues(block) {
     return hasTextPlaceholder(block.html) ? ['не заполнены поля'] : [];
   }
   const issues = [];
-  if (!block.lineId) issues.push('нет линии защиты', 'нет аргументов');
+  // конструкторный блок доводов ходатайства живёт без линии из карточки дела
+  if (!block.lineId && block.kind !== 'motion-args') issues.push('нет линии защиты', 'нет аргументов');
   if (blockLacksEvidence(block)) issues.push('не хватает доказательств у аргументов');
   if (block.argsStale) issues.push('аргументы не обновлены');
   return issues;
@@ -210,6 +211,10 @@ function blockSummary(block) {
 function blockLead(block) {
   const sec = block.section || 'defense';
   if (block.kind === 'grounds') return 'Основания для отмены';
+  // блоки визарда ходатайств со своими именами
+  if (block.kind === 'motion-args') return 'Доводы переквалификации';
+  if (block.kind === 'motion-body2') return 'Правовое обоснование';
+  if (block.kind === 'motion-att') return 'Приложение и подпись';
   if (sec !== 'defense' || !(block.parts && block.parts.length)) {
     const titles = { verdict: 'Описание судебного акта', facts: 'Обстоятельства дела', admission: 'Позиция по приговору', law: 'Правовое обоснование' };
     return titles[sec] || 'Текстовый блок';

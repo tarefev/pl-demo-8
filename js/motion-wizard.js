@@ -190,6 +190,8 @@ function mwSync() {
   if (body) body.html = html;
   else body = getBlock(insertBlock(html, { section: 'facts', kind: 'motion-body' }));
 
+  mwSyncArgsBlock(built);
+
   // приложения + дата и подпись (по шаблону идут после просительной части)
   const attHtml = (built.attachments && built.attachments.length
     ? `<p><b>Приложение:</b></p><ol>${built.attachments.map(a => `<li>${a}</li>`).join('')}</ol>` : '')
@@ -215,10 +217,13 @@ function mwSync() {
  * первому выделению. На следующем шаге пересборка гасит прежние пометки сама.
  */
 function mwMarkAdded(built, headerLines, bodyBlock) {
+  const argsBlk = state.blocks.find(b => b.kind === 'motion-args');
   const prev = mwCtx.prevSnap;
   mwCtx.prevSnap = {
     header: headerLines.slice(),
     body: built.body.slice(),
+    args: argsBlk ? (argsBlk.genPs || []).slice() : [],
+    after: (built.bodyAfter || []).slice(),
     pleas: state.pleas.slice(),
     att: (built.attachments || []).slice()
   };
@@ -238,6 +243,12 @@ function mwMarkAdded(built, headerLines, bodyBlock) {
   mark([...document.querySelectorAll('#doc-header-body p')], headerLines, prev.header);
   const bodyEl = bodyBlock && document.querySelector(`.doc-block[data-block-id="${bodyBlock.id}"] .doc-block__content`);
   if (bodyEl) mark([...bodyEl.children].filter(n => n.tagName === 'P'), built.body, prev.body);
+  // конструкторный блок доводов и следующий за ним вывод с цитатами норм
+  const argsEl = argsBlk && document.querySelector(`.doc-block[data-block-id="${argsBlk.id}"] .doc-generated__body`);
+  if (argsEl) mark([...argsEl.children].filter(n => n.tagName === 'P'), argsBlk.genPs || [], prev.args || []);
+  const body2Blk = state.blocks.find(b => b.kind === 'motion-body2');
+  const body2El = body2Blk && document.querySelector(`.doc-block[data-block-id="${body2Blk.id}"] .doc-block__content`);
+  if (body2El) mark([...body2El.children].filter(n => n.tagName === 'P'), built.bodyAfter || [], prev.after || []);
   mark([...document.querySelectorAll('#doc-pleas .doc-pleas li')], state.pleas, prev.pleas);
   const att = state.blocks.find(b => b.kind === 'motion-att');
   const attEl = att && document.querySelector(`.doc-block[data-block-id="${att.id}"] .doc-block__content`);
@@ -296,12 +307,54 @@ function mwMarkWords(node, prevHtml) {
 }
 
 /**
+ * Конструкторный блок доводов (переквалификация): тезис и доводы с основаниями —
+ * такой же блок, как в апелляционной жалобе: слева работает конструктор, нормы и
+ * доказательства добавляются и убираются в основаниях доводов. Пересобирается
+ * только при изменении состава на шаге «Квалификация» — правки слева живут.
+ * Следом отдельным блоком идут вывод и цитаты норм (bodyAfter).
+ */
+function mwSyncArgsBlock(built) {
+  const ab = built.argsBlock;
+  let argsBlk = state.blocks.find(b => b.kind === 'motion-args');
+  let body2 = state.blocks.find(b => b.kind === 'motion-body2');
+
+  if (!ab) {
+    if (argsBlk || body2) state.blocks = state.blocks.filter(b => b.kind !== 'motion-args' && b.kind !== 'motion-body2');
+    return;
+  }
+
+  const sig = JSON.stringify([ab.thesis, ab.args.map(a => a.text)]);
+  if (!argsBlk) argsBlk = getBlock(insertBlock('', { section: 'facts', kind: 'motion-args' }));
+  if (argsBlk.argsSig !== sig) {
+    argsBlk.argsSig = sig;
+    argsBlk.argsList = ab.args.map(a => ({ text: a.text, source: null, auto: true, poolIdx: null, grounds: (a.grounds || []).map(g => ({ ...g })) }));
+    argsBlk.parts = [
+      { key: 'line', title: 'Линия защиты', html: 'Переквалификация обвинения' },
+      ...(ab.thesis ? [{ key: 'thesis', title: 'Тезис', html: ab.thesis }] : []),
+      { key: 'arguments', title: 'Доводы', html: argsListToHtml(argsBlk.argsList) }
+    ];
+    const ps = [];
+    if (ab.thesis) ps.push(endDot(ab.thesis));
+    argsBlk.argsList.forEach(a => ps.push(`${endDot(a.text)}${a.grounds.length ? ` Это подтверждается: ${a.grounds.map(g => g.text).join('; ')}.` : ''}`));
+    argsBlk.genPs = ps;
+    argsBlk.generated = ps.map(p => `<p>${p}</p>`).join('');
+    argsBlk.evidence = argsBlk.evidence || [];
+    argsBlk.constructorDone = true;
+    argsBlk.dirty = false;
+  }
+
+  const html2 = (built.bodyAfter || []).map(p => `<p>${p}</p>`).join('');
+  if (body2) body2.html = html2;
+  else insertBlock(html2, { section: 'facts', kind: 'motion-body2' });
+}
+
+/**
  * Гасим управление в уже пройденных шагах: активным остаётся только последний.
  * Иначе клик по «Назад» старого шага уводит не туда, куда ожидает пользователь.
  */
 function mwLockPast() {
   document.querySelectorAll('#assistant-feed .msg').forEach(msg => {
-    msg.querySelectorAll('.mw-back, .mw-ok, .mw-add, .mw-item, .mw-all, .mw-check input, .mw-input, .mw-field input, .mw-field select, .mw-chip button, .mw-var__head, .mw-arg__row input, .mw-thesis, .mw-arg__text')
+    msg.querySelectorAll('.mw-back, .mw-ok, .mw-add, .mw-item, .mw-all, .mw-check input, .mw-input, .mw-field input, .mw-field select, .mw-chip button, .mw-var__head, .mw-arg__row input, .mw-thesis, .mw-arg__text, .mw-free input')
       .forEach(x => { x.disabled = true; if (x.isContentEditable) x.contentEditable = 'false'; });
   });
 }
@@ -463,6 +516,10 @@ function mwMultiGroup(el, s) {
       <div class="mw-group__body">
         <button class="mw-all" type="button">Выбрать всё в разделе</button>
         ${items.map(t => `<label class="mw-check"><input type="checkbox"><span>${t}</span></label>`).join('')}
+        ${g.free ? `<div class="mw-free">
+          <input type="text" placeholder="Свой пункт — если подходящего нет в списке">
+          <button class="mw-add" type="button">Добавить</button>
+        </div>` : ''}
       </div>`;
     grp.querySelector('.mw-group__head').addEventListener('click', () => {
       const open = grp.classList.contains('is-open');
@@ -473,13 +530,32 @@ function mwMultiGroup(el, s) {
       items.forEach(t => picked.add(t));
       drawBasket(); syncChecks(); showWarn();
     });
-    grp.querySelectorAll('.mw-check input').forEach(inp => {
-      inp.addEventListener('change', e => {
-        const text = e.target.closest('.mw-check').querySelector('span').textContent;
-        if (e.target.checked) picked.add(text); else picked.delete(text);
-        drawBasket(); syncChecks(); showWarn();
-      });
+    const wireCheck = inp => inp.addEventListener('change', e => {
+      const text = e.target.closest('.mw-check').querySelector('span').textContent;
+      if (e.target.checked) picked.add(text); else picked.delete(text);
+      drawBasket(); syncChecks(); showWarn();
     });
+    grp.querySelectorAll('.mw-check input').forEach(wireCheck);
+
+    // свободный ввод: свой пункт добавляется в раздел уже отмеченным
+    const free = grp.querySelector('.mw-free');
+    if (free) {
+      const inp = free.querySelector('input');
+      const addFree = () => {
+        const t = inp.value.replace(/\s+/g, ' ').trim();
+        if (!t) return;
+        const lab = document.createElement('label');
+        lab.className = 'mw-check is-on';
+        lab.innerHTML = `<input type="checkbox" checked><span>${t}</span>`;
+        wireCheck(lab.querySelector('input'));
+        free.before(lab);
+        picked.add(t);
+        inp.value = '';
+        drawBasket(); syncChecks(); showWarn();
+      };
+      free.querySelector('button').addEventListener('click', addFree);
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addFree(); } });
+    }
     wrap.appendChild(grp);
   });
 
@@ -661,6 +737,39 @@ function mwRequalify(el, s) {
   let opts = [];
   let picked = null; // объект таблицы либо { manual: true }
 
+  /** Текущий ответ шага по состоянию контролов (для живой сборки и «Готово»). */
+  const collect = () => {
+    const ans = { from: fromInput.value.trim(), to: '', thesis: '', args: [] };
+    if (!picked) return ans;
+    if (picked.manual) {
+      ans.to = ((varsEl.querySelector('.mw-var--manual input') || {}).value || '').trim();
+      return ans;
+    }
+    const openVar = varsEl.querySelector('.mw-var.is-open');
+    if (!openVar) return ans;
+    ans.to = picked.to;
+    ans.thesis = openVar.querySelector('.mw-thesis').innerText.replace(/\s+/g, ' ').trim();
+    ans.args = [...openVar.querySelectorAll('.mw-arg')]
+      .filter(a => a.querySelector('input').checked)
+      .map(a => ({
+        text: a.querySelector('.mw-arg__text').innerText.replace(/\s+/g, ' ').trim(),
+        grounds: picked.args[+a.dataset.ai].grounds
+      }))
+      .filter(a => a.text);
+    return ans;
+  };
+
+  // отмеченные доводы сразу отображаются в документе, снятые — исчезают;
+  // «Готово» лишь фиксирует состав и ведёт на следующий шаг
+  let liveTimer = null;
+  const liveSync = (immediate) => {
+    clearTimeout(liveTimer);
+    liveTimer = setTimeout(() => {
+      mwCtx.answers.qual = collect();
+      mwSync();
+    }, immediate ? 0 : 500);
+  };
+
   const renderVars = () => {
     opts = findRequalifyOptions(fromInput.value);
     picked = null;
@@ -707,10 +816,17 @@ function mwRequalify(el, s) {
       varsEl.querySelectorAll('.mw-var').forEach(x => x.classList.toggle('is-open', x === v));
       picked = v.classList.contains('mw-var--manual') ? { manual: true } : opts.find(o => o.id === v.dataset.id);
       scrollFeed();
+      liveSync(true);   // предвыбранные доводы сразу встают в текст документа
     }));
+    // галка довода: снял — довод исчез из документа, вернул — появился;
+    // правка тезиса или текста довода тоже подтягивается (с задержкой)
+    varsEl.querySelectorAll('.mw-arg__row input').forEach(i => i.addEventListener('change', () => liveSync(true)));
+    varsEl.querySelectorAll('.mw-thesis, .mw-arg__text').forEach(t => t.addEventListener('input', () => liveSync(false)));
+    varsEl.querySelectorAll('.mw-var--manual input').forEach(i => i.addEventListener('input', () => liveSync(false)));
   };
   renderVars();
-  fromInput.addEventListener('input', renderVars);
+  // смена вменённой статьи пересчитывает варианты и убирает прежние доводы из документа
+  fromInput.addEventListener('input', () => { renderVars(); liveSync(false); });
 
   const ok = document.createElement('button');
   ok.className = 'mw-ok'; ok.type = 'button';
@@ -718,35 +834,18 @@ function mwRequalify(el, s) {
   let warned = false;
   ok.addEventListener('click', () => {
     if (state.busy) return;
-    const from = fromInput.value.trim();
-    const manualTo = (varsEl.querySelector('.mw-var--manual input') || {}).value || '';
-    const hasPick = picked && (!picked.manual || manualTo.trim());
-    if ((!from || !hasPick) && !warned) {
+    clearTimeout(liveTimer);
+    const ans = collect();
+    if ((!ans.from || !ans.to) && !warned) {
       warned = true;
       ok.textContent = 'Всё равно продолжить';
       return mwWarn(el, 'Выберите вариант переквалификации из таблицы или укажите свою статью. Либо нажмите ещё раз — в документе останутся жёлтые метки.');
-    }
-
-    let ans = { from, to: '', thesis: '', args: [] };
-    if (picked && picked.manual) {
-      ans.to = manualTo.trim();
-    } else if (picked) {
-      const openVar = varsEl.querySelector('.mw-var.is-open');
-      ans.to = picked.to;
-      ans.thesis = openVar.querySelector('.mw-thesis').innerText.replace(/\s+/g, ' ').trim();
-      ans.args = [...openVar.querySelectorAll('.mw-arg')]
-        .filter(a => a.querySelector('input').checked)
-        .map(a => ({
-          text: a.querySelector('.mw-arg__text').innerText.replace(/\s+/g, ' ').trim(),
-          grounds: picked.args[+a.dataset.ai].grounds
-        }))
-        .filter(a => a.text);
     }
     el.querySelectorAll('button, input, [contenteditable]').forEach(x => {
       x.disabled = true;
       if (x.isContentEditable) x.contentEditable = 'false';
     });
-    addMessage('user', `${from || '—'} → ${ans.to || '—'}${ans.args.length ? ` · доводов: ${ans.args.length}` : ''}`);
+    addMessage('user', `${ans.from || '—'} → ${ans.to || '—'}${ans.args.length ? ` · доводов: ${ans.args.length}` : ''}`);
     mwNext(ans, s.key);
   });
   el.appendChild(ok);
