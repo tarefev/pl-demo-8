@@ -20,9 +20,10 @@ function startMotionWizard() {
 function buildCatalog() {
   const wrap = document.createElement('div');
   wrap.className = 'mw-groups';
-  MOTION_CATALOG.forEach((g, gi) => {
+  MOTION_CATALOG.forEach(g => {
     const grp = document.createElement('div');
-    grp.className = 'mw-group' + (gi === 0 ? ' is-open' : '');
+    // все разделы каталога изначально свёрнуты — адвокат раскрывает нужный
+    grp.className = 'mw-group';
     grp.innerHTML = `
       <button class="mw-group__head" type="button">
         <span>${g.title}</span><span class="mw-group__count">${g.items.length}</span>
@@ -203,14 +204,14 @@ function mwSync() {
   renderBlocks();
   renderPleas();
   updateChecklist();
-  if (changed && body) flashBlock(body.id);
   mwMarkAdded(built, headerLines, body);
 }
 
 /**
  * Подсветка добавленного на текущем шаге: сравниваем сборку с предыдущей и
- * помечаем новые строки шапки, абзацы, пункты просьбы и приложения зелёным.
- * На следующем шаге документ пересобирается — прежние пометки гаснут сами.
+ * помечаем маркером ровно добавленные слова (новый абзац — целиком, изменённый —
+ * только вставленный фрагмент по словному диффу). Документ прокручивается к
+ * первому выделению. На следующем шаге пересборка гасит прежние пометки сама.
  */
 function mwMarkAdded(built, headerLines, bodyBlock) {
   const prev = mwCtx.prevSnap;
@@ -226,7 +227,11 @@ function mwMarkAdded(built, headerLines, bodyBlock) {
     const seen = new Set(prevList);
     nodes.forEach((n, i) => {
       const v = items[i];
-      if (v && String(v).trim() && !seen.has(v)) n.classList.add('doc-added');
+      if (!v || !String(v).trim() || seen.has(v)) return;
+      // на этой позиции была другая версия абзаца — выделяем только добавленные
+      // слова; если старая строка просто сдвинулась, абзац считается новым целиком
+      const prevHtml = prevList[i] && !items.includes(prevList[i]) ? prevList[i] : null;
+      mwMarkWords(n, prevHtml);
     });
   };
   mark([...document.querySelectorAll('#doc-header-body p')], headerLines, prev.header);
@@ -236,6 +241,57 @@ function mwMarkAdded(built, headerLines, bodyBlock) {
   const att = state.blocks.find(b => b.kind === 'motion-att');
   const attEl = att && document.querySelector(`.doc-block[data-block-id="${att.id}"] .doc-block__content`);
   if (attEl) mark([...attEl.querySelectorAll('ol > li')], built.attachments || [], prev.att);
+
+  // документ прокручивается к месту, куда добавился текст
+  const first = document.querySelector('.doc-added');
+  if (first) smoothScrollTo(first);
+}
+
+/**
+ * Выделение добавленных слов внутри абзаца. Без prevHtml абзац новый — маркер
+ * на весь текст; с prevHtml делаем словный дифф (общий префикс и суффикс)
+ * и обводим только вставленную середину, не ломая вложенную разметку.
+ */
+function mwMarkWords(node, prevHtml) {
+  const cur = node.textContent;
+  let from = 0, to = cur.length;
+
+  if (prevHtml) {
+    const d = document.createElement('div');
+    d.innerHTML = prevHtml;
+    const pw = d.textContent.split(/\s+/).filter(Boolean);
+    const tokens = [...cur.matchAll(/\S+/g)];
+    const cw = tokens.map(t => t[0]);
+    let a = 0;
+    while (a < cw.length && a < pw.length && cw[a] === pw[a]) a += 1;
+    let b = 0;
+    while (b < cw.length - a && b < pw.length - a && cw[cw.length - 1 - b] === pw[pw.length - 1 - b]) b += 1;
+    if (cw.length - a - b <= 0) return; // слова не добавились (только удаление)
+    from = tokens[a].index;
+    const last = tokens[cw.length - 1 - b];
+    to = last.index + last[0].length;
+  }
+  if (!cur.slice(from, to).trim()) return;
+
+  // обводим диапазон по текстовым узлам — <br> и жёлтые метки не разрываются
+  const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  let pos = 0;
+  nodes.forEach(tn => {
+    const len = tn.textContent.length;
+    const s = Math.max(from - pos, 0);
+    const e = Math.min(to - pos, len);
+    if (s < e) {
+      const range = document.createRange();
+      range.setStart(tn, s);
+      range.setEnd(tn, e);
+      const span = document.createElement('span');
+      span.className = 'doc-added';
+      try { range.surroundContents(span); } catch { /* пропускаем необорачиваемый кусок */ }
+    }
+    pos += len;
+  });
 }
 
 /**

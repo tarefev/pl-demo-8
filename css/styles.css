@@ -257,11 +257,14 @@ button {
 .doc-block__content p, .doc-generated__body p { margin: 0 0 14px; }
 .doc-block__content p:last-child, .doc-generated__body p:last-child { margin-bottom: 0; }
 
-/* добавленный на текущем шаге текст; пометка снимается со следующим шагом */
+/* добавленные на текущем шаге слова — маркер строго по тексту, без плашки
+   на весь абзац; пометка снимается со следующим шагом */
 .doc-added {
-  background: #e2f2e0;
-  box-shadow: 0 0 0 2px #e2f2e0;
-  border-radius: 3px;
+  background: #c7e8ff;
+  border-radius: 2px;
+  padding: 0 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 /* элементы вне блоков выравниваются по текстовой колонке (отступы под оба столбца) */
