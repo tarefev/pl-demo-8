@@ -271,7 +271,10 @@ const MOTION_DEFS = {
         q: 'По каким причинам доказательство является недопустимым?',
         groups: () => INADMISSIBILITY_GROUPS
       },
-      { type: 'text', key: 'facts', q: 'Изложите обстоятельства получения доказательства, свидетельствующие о его недопустимости.', ai: true }
+      // обстоятельства излагаются по каждой выбранной причине отдельно;
+      // нормативная база и практика подтягиваются из справочника
+      { type: 'facts-per-reason', key: 'factsBy',
+        q: 'Изложите обстоятельства получения доказательства, свидетельствующие о его недопустимости.' }
     ],
     build: ctx => buildInadmissible(ctx, false)
   },
@@ -287,7 +290,8 @@ const MOTION_DEFS = {
         q: 'По каким причинам доказательство является недопустимым?',
         groups: () => INADMISSIBILITY_GROUPS
       },
-      { type: 'text', key: 'facts', q: 'Изложите обстоятельства получения доказательства, свидетельствующие о его недопустимости.', ai: true }
+      { type: 'facts-per-reason', key: 'factsBy',
+        q: 'Изложите обстоятельства получения доказательства, свидетельствующие о его недопустимости.' }
     ],
     build: ctx => buildInadmissible(ctx, true)
   },
@@ -971,15 +975,24 @@ function buildInadmissible(ctx, inCourt) {
   const ev = ctx.answers.ev || {};
   const ref = evidenceRef(ev);
   const reasons = ctx.answers.reasons || [];
+  const factsBy = ctx.answers.factsBy || {};
   const onlyValue = reasons.length > 0 && reasons.every(r =>
     INADMISSIBILITY_GROUPS.find(g => g.id === 'value').items.includes(r));
 
   const body = [
     ...motionIntro(ctx, { charged: inCourt }),
     `В материалах уголовного дела в качестве доказательства стороны обвинения представлено: ${ref}.`,
-    mText(ctx.answers.facts, 'изложить обстоятельства получения доказательства'),
-    `Изложенное свидетельствует о следующем: ${reasons.length ? reasons.map(r => r.toLowerCase()).join('; ') : mMark('указать причины')}.`
+    `Указанное доказательство ${onlyValue ? 'не может быть положено в основу обвинения' : 'является недопустимым'} по следующим основаниям.`
   ];
+  // по каждой причине — обстоятельства адвоката и подтягиваемые из справочника
+  // норма и практика (раздел «Подтверждается», как у довода в апелляции)
+  reasons.forEach(r => {
+    const t = (factsBy[r] || '').trim();
+    const support = (typeof INADMISSIBILITY_SUPPORT !== 'undefined' ? INADMISSIBILITY_SUPPORT[r] : null) || [];
+    body.push(`${endDot(r)} ${t ? endDot(t.charAt(0).toUpperCase() + t.slice(1)) : mMark('изложить обстоятельства по этой причине')}${
+      support.length ? ` Это подтверждается: ${support.map(g => g.text).join('; ')}.` : ''}`);
+  });
+  if (!reasons.length) body.push(mMark('выбрать причины недопустимости и изложить обстоятельства'));
   if (onlyValue) {
     body.push('В силу статьи 88 УПК РФ каждое доказательство подлежит оценке с точки зрения относимости, допустимости и достоверности. Указанное доказательство не отвечает названным требованиям и не может быть положено в основу обвинения.');
   } else if (inCourt) {
@@ -1012,7 +1025,7 @@ function buildInadmissible(ctx, inCourt) {
       { label: 'Указано доказательство', ok: !!(ev.title || '').trim() },
       { label: 'Указаны том и листы дела', ok: !!(ev.volume && ev.sheets) },
       { label: 'Выбраны причины', ok: reasons.length > 0 },
-      { label: 'Изложены обстоятельства получения', ok: !!(ctx.answers.facts || '').trim() }
+      { label: 'Обстоятельства изложены по каждой причине', ok: reasons.length > 0 && reasons.every(r => (factsBy[r] || '').trim()) }
     ]
   };
 }

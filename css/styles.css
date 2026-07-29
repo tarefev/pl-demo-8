@@ -2429,3 +2429,17 @@ body.text-only .doc-generated {
 .mw-gb--evidence { background: #e6f6f8; color: #0e7787; }
 .mw-gb--norm { background: var(--accent-soft); color: var(--accent); }
 .mw-gb--practice { background: #eaf6ec; color: #2e7d43; }
+
+/* --- Шаг «обстоятельства по каждой причине» (недопустимость доказательства) --- */
+.mw-fr {
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 8px;
+  background: var(--surface);
+}
+.mw-fr__reason { font-weight: 700; font-size: 13px; margin-bottom: 6px; }
+.mw-fr .mw-input { min-height: 40px; }
+.mw-fr__support { margin-top: 8px; transition: opacity .25s; }
+.mw-fr__support.is-dim { opacity: .45; }
+.mw-fr__support .mw-gr { margin-top: 3px; }

@@ -133,7 +133,8 @@ function mwRunStep() {
   const render = {
     'choice': mwChoice, 'choice-group': mwChoiceGroup, 'multi': mwMulti,
     'multi-group': mwMultiGroup, 'text': mwText, 'form': mwForm,
-    'evidence': mwEvidence, 'confirm': mwConfirm, 'requalify': mwRequalify
+    'evidence': mwEvidence, 'confirm': mwConfirm, 'requalify': mwRequalify,
+    'facts-per-reason': mwFactsPerReason
   }[s.type];
   if (render) render(el, s);
   scrollFeed();
@@ -576,6 +577,66 @@ function mwText(el, s) {
   el.appendChild(box);
   el.appendChild(actions);
   setTimeout(() => input.focus(), 50);
+}
+
+/**
+ * Обстоятельства недопустимости по каждой выбранной причине отдельно.
+ * Под полем — «Подтверждается»: норма и практика из справочника
+ * INADMISSIBILITY_SUPPORT; пока поле пустое, ссылки приглушены, при вводе
+ * «подтягиваются». В документ они попадают вместе с обстоятельствами.
+ */
+function mwFactsPerReason(el, s) {
+  const reasons = mwCtx.answers.reasons || [];
+  const box = document.createElement('div');
+  box.className = 'mw-frs';
+
+  if (!reasons.length) {
+    box.innerHTML = '<div class="mw-hint">Причины недопустимости не выбраны — вернитесь на шаг назад и отметьте их.</div>';
+  }
+  reasons.forEach(r => {
+    const support = (typeof INADMISSIBILITY_SUPPORT !== 'undefined' ? INADMISSIBILITY_SUPPORT[r] : null) || [];
+    const fr = document.createElement('div');
+    fr.className = 'mw-fr';
+    fr.dataset.reason = r;
+    fr.innerHTML = `
+      <div class="mw-fr__reason">${r}</div>
+      <div class="mw-input" contenteditable="true" data-ph="Обстоятельства по этой причине…"></div>
+      ${support.length ? `
+      <div class="mw-fr__support is-dim">
+        <div class="mw-var__cap">Подтверждается</div>
+        ${support.map(g => `<div class="mw-gr"><span class="mw-gb mw-gb--${g.type}">${GROUND_LABELS[g.type] || g.type}</span><span>${g.text}</span></div>`).join('')}
+      </div>` : ''}`;
+    const input = fr.querySelector('.mw-input');
+    const sup = fr.querySelector('.mw-fr__support');
+    // ссылки «подтягиваются», когда обстоятельства по причине заполнены
+    if (sup) input.addEventListener('input', () => sup.classList.toggle('is-dim', !input.innerText.trim()));
+    box.appendChild(fr);
+  });
+  el.appendChild(box);
+
+  const ok = document.createElement('button');
+  ok.className = 'mw-ok'; ok.type = 'button';
+  ok.textContent = 'Готово';
+  let warned = false;
+  ok.addEventListener('click', () => {
+    if (state.busy) return;
+    const val = {};
+    box.querySelectorAll('.mw-fr').forEach(fr => {
+      const t = fr.querySelector('.mw-input').innerText.replace(/\s+/g, ' ').trim();
+      if (t) val[fr.dataset.reason] = t;
+    });
+    const missing = reasons.filter(r => !val[r]);
+    if (missing.length && !warned) {
+      warned = true;
+      ok.textContent = 'Всё равно продолжить';
+      return mwWarn(el, `Обстоятельства не изложены: ${missing.map(m => `«${m.toLowerCase()}»`).join(', ')}. Заполните или нажмите ещё раз — в документе останутся жёлтые метки.`);
+    }
+    el.querySelectorAll('button, .mw-input').forEach(x => { x.disabled = true; x.contentEditable = 'false'; });
+    addMessage('user', Object.keys(val).length ? `Обстоятельства изложены: ${Object.keys(val).length} из ${reasons.length}` : 'Пропустить');
+    mwNext(val, s.key);
+  });
+  el.appendChild(ok);
+  setTimeout(() => { const f = box.querySelector('.mw-input'); if (f) f.focus(); }, 50);
 }
 
 /**
