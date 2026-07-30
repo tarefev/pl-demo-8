@@ -329,6 +329,9 @@ function mwSyncArgsBlock(built) {
     argsBlk = getBlock(insertBlock('', { section: 'facts', kind: 'motion-args' }));
     argsBlk.constructorDone = true; // создаётся свёрнутым — раскрывается стрелкой
   }
+  // для перегенерации после завершения визарда: каким промтом переписывать текст
+  argsBlk.rewriteKind = ab.rewriteKind || null;
+  argsBlk.motionStage = mwCtx.stage;
   if (argsBlk.argsSig !== sig) {
     argsBlk.argsSig = sig;
     argsBlk.leadTitle = ab.lead || 'Доводы';
@@ -376,6 +379,34 @@ function mwSyncArgsBlock(built) {
   const html2 = (built.bodyAfter || []).map(p => `<p>${p}</p>`).join('');
   if (body2) body2.html = html2;
   else insertBlock(html2, { section: 'facts', kind: 'motion-body2' });
+}
+
+/** Абзацы блока доводов по текущему конструктору (тезис + доводы с основаниями). */
+function motionArgsPs(block) {
+  const ps = [];
+  const strip = html => { const d = document.createElement('div'); d.innerHTML = html || ''; return d.textContent.replace(/\s+/g, ' ').trim(); };
+  const th = (block.parts || []).find(p => p.key === 'thesis');
+  if (th) ps.push(endDot(strip(th.html)));
+  (block.argsList || []).forEach(a => {
+    const t = strip(a.text);
+    if (!t) return;
+    const gr = (a.grounds || []).map(g => `${strip(g.text)}${g.evidence ? ' (' + g.evidence + ')' : ''}`).filter(Boolean).join('; ');
+    ps.push(`${endDot(t)}${gr ? ` Это подтверждается: ${gr}.` : ''}`);
+  });
+  return ps;
+}
+
+/** Черновой текст раздела — вход для промта-редактора ({{text}}). */
+function motionArgsDraft(block) {
+  return motionArgsPs(block).join('\n\n');
+}
+
+/** Применить новые абзацы к блоку доводов. */
+function applyMotionArgsText(block, ps) {
+  const clean = (ps || []).map(p => String(p).trim()).filter(Boolean);
+  if (!clean.length) return;
+  block.genPs = clean;
+  block.generated = clean.map(p => `<p>${p}</p>`).join('');
 }
 
 /**
@@ -1338,11 +1369,29 @@ function mwExpandFallback(raw) {
 
 /* ================= Предпросмотр и вставка ================= */
 
-function mwPreview() {
+async function mwPreview() {
   setStep('М.Ф');
   // документ уже пересобран в mwNext; повторный sync погасил бы подсветку последнего шага
   const built = mwCtx.built;
   const title = mwCtx.def.title(mwCtx);
+
+  // основания недопустимости прогоняются через редактора-нейронку (промт
+  // заказчика): черновая склейка превращается в связный юридический текст.
+  // Без ключа или при незаполненных метках остаётся шаблонная сборка.
+  const argsBlk = state.blocks.find(b => b.kind === 'motion-args');
+  if (argsBlk && argsBlk.rewriteKind === 'inadmissibility'
+      && typeof LLM !== 'undefined' && LLM.enabled() && !/ph-mark/.test(argsBlk.generated || '')) {
+    try {
+      const out = await thinkWhile('Собираю раздел об основаниях недопустимости нейросетью', () =>
+        LLM.complete(
+          fillPrompt(PROMPTS.inadmUser, { text: motionArgsDraft(argsBlk), stage: stageLabel(argsBlk.motionStage) }),
+          { system: PROMPTS.inadmSystem, maxTokens: 4000 }));
+      applyMotionArgsText(argsBlk, out.split(/\n{2,}/));
+      renderBlocks();
+    } catch (err) {
+      addMessage('assistant', `(ИИ недоступен для раздела оснований: ${err.message} — оставлен шаблонный текст.)`);
+    }
+  }
 
   mwLockPast();
   const el = addMessage('assistant', '');
