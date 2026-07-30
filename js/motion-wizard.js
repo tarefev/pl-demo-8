@@ -547,7 +547,9 @@ function mwMultiGroup(el, s) {
   groups.forEach((g, gi) => {
     const items = g.items.map(i => (typeof i === 'string' ? i : i.text));
     const grp = document.createElement('div');
-    grp.className = 'mw-group' + (gi === 0 ? ' is-open' : '');
+    // несколько разделов — все изначально свёрнуты (адвокат раскрывает нужный);
+    // единственный раздел раскрыт сразу, чтобы не заставлять лишний клик
+    grp.className = 'mw-group' + (groups.length === 1 && gi === 0 ? ' is-open' : '');
     grp.dataset.gid = g.id || String(gi);
     grp.innerHTML = `
       <button class="mw-group__head" type="button">
