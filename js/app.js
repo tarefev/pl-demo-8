@@ -126,6 +126,8 @@ function blockIssues(block) {
   if (!block.lineId && block.kind !== 'motion-args') issues.push('нет линии защиты', 'нет аргументов');
   if (blockLacksEvidence(block)) issues.push('не хватает доказательств у аргументов');
   if (block.argsStale) issues.push('аргументы не обновлены');
+  // гейт «тип доказательства × основание»: часть доказательств отсечена
+  if (block.gateNote) issues.push(block.gateNote);
   return issues;
 }
 
@@ -1146,11 +1148,10 @@ async function onRegenerateClick(block) {
   if (block.kind === 'motion-args') {
     if (block.rewriteKind === 'inadmissibility' && typeof LLM !== 'undefined' && LLM.enabled()) {
       try {
-        const out = await thinkWhile('Переписываю раздел об основаниях недопустимости нейросетью', () =>
-          LLM.complete(
-            fillPrompt(PROMPTS.inadmUser, { text: motionArgsDraft(block), stage: stageLabel(block.motionStage) }),
-            { system: PROMPTS.inadmSystem, maxTokens: 4000 }));
-        applyMotionArgsText(block, out.split(/\n{2,}/));
+        // по одному вызову на каждое доказательство — абзац на доказательство
+        const ps = await thinkWhile('Переписываю раздел об основаниях недопустимости нейросетью', () =>
+          llmInadmParagraphs(block));
+        applyMotionArgsText(block, ps);
         addMessage('assistant', 'Раздел об основаниях недопустимости переписан нейросетью по данным конструктора.');
       } catch (err) {
         applyMotionArgsText(block, motionArgsPs(block));
@@ -1231,6 +1232,7 @@ function renderBlocks() {
               title="${blockSummary(block).replace(/"/g, '&quot;')}&#10;Перетащите, чтобы переставить блок">${blockLead(block)}</span>
       </div>
       ${needsEv ? `<button class="doc-info__alert" data-h="needs-ev" title="Развернуть конструктор и перейти к аргументу без доказательства">Не хватает доказательств</button>` : ''}
+      ${block.gateNote ? `<div class="doc-info__alert" title="${block.gateNote.replace(/"/g, '&quot;')}">${block.gateNote}</div>` : ''}
       ${details.episode ? `<div class="doc-info__episode">${details.episode}</div>` : ''}
       ${details.thesis ? `<div class="doc-info__thesis" title="${details.thesis.replace(/"/g, '&quot;')}">${details.thesis}</div>` : ''}`;
 
@@ -1825,6 +1827,9 @@ function argNeedsEvidence(arg) {
 
 /** Есть ли в блоке аргументы без доказательств. */
 function blockLacksEvidence(block) {
+  // основания недопустимости подтверждаются нормами — доказательство-основание
+  // у такого довода не требуется, жёлтый бейдж неуместен
+  if (block.kind === 'motion-args') return false;
   return !!(block.argsList && block.argsList.some(argNeedsEvidence));
 }
 

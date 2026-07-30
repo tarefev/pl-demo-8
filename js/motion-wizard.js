@@ -324,7 +324,8 @@ function mwSyncArgsBlock(built) {
     return;
   }
 
-  const sig = JSON.stringify([ab.lead, ab.thesis, ab.args.map(a => [a.srcKey || '', a.text, a.tailMark || ''])]);
+  const sig = JSON.stringify([ab.lead, ab.thesis, ab.args.map(a =>
+    [a.srcKey || '', a.text, a.tailMark || '', a.gate ? [a.gate.facts, a.gate.norms, a.gate.grounds] : null])]);
   if (!argsBlk) {
     argsBlk = getBlock(insertBlock('', { section: 'facts', kind: 'motion-args' }));
     argsBlk.constructorDone = true; // создаётся свёрнутым — раскрывается стрелкой
@@ -332,6 +333,8 @@ function mwSyncArgsBlock(built) {
   // для перегенерации после завершения визарда: каким промтом переписывать текст
   argsBlk.rewriteKind = ab.rewriteKind || null;
   argsBlk.motionStage = mwCtx.stage;
+  // доказательства, отсечённые гейтом (основания не подходят типу) — бейдж у блока
+  argsBlk.gateNote = ab.gateNote || '';
   if (argsBlk.argsSig !== sig) {
     argsBlk.argsSig = sig;
     argsBlk.leadTitle = ab.lead || 'Доводы';
@@ -353,7 +356,8 @@ function mwSyncArgsBlock(built) {
       return {
         text: a.text, srcKey: a.srcKey || null, tailMark: a.tailMark || '',
         source: null, auto: true, poolIdx: null,
-        grounds, baseGroundsSig: baseSig
+        grounds, baseGroundsSig: baseSig,
+        gate: a.gate || null   // payload редактора: отобранные кодом основания и нормы
       };
     });
     // доводы, добавленные адвокатом вручную слева, остаются в конце
@@ -381,6 +385,33 @@ function mwSyncArgsBlock(built) {
   else insertBlock(html2, { section: 'facts', kind: 'motion-body2' });
 }
 
+/**
+ * Редактор-нейросеть для «Оснований недопустимости»: по одному вызову на каждое
+ * доказательство (payload — отобранные кодом основания и нормы плюс фактический
+ * состав норм из конструктора с учётом ручных правок). Ручные доводы без
+ * payload остаются как есть. Возвращает массив абзацев.
+ */
+async function llmInadmParagraphs(blk) {
+  const ps = [];
+  for (const a of (blk.argsList || [])) {
+    if (!a.gate) {
+      const t = (a.text || '').trim();
+      if (t) ps.push(endDot(t));
+      continue;
+    }
+    const norms = (a.grounds || []).map(g => g.text).filter(Boolean);
+    const out = await LLM.complete(fillPrompt(PROMPTS.inadmUser, {
+      evidence: a.gate.evidence || '—',
+      grounds: (a.gate.grounds || []).join('; ') || '—',
+      norms: norms.join('; ') || '—',
+      facts: a.gate.facts || '—',
+      stage: stageLabel(blk.motionStage)
+    }), { system: PROMPTS.inadmSystem, maxTokens: 2000 });
+    ps.push(out.replace(/\n+/g, ' ').trim());
+  }
+  return ps;
+}
+
 /** Абзацы блока доводов по текущему конструктору (тезис + доводы с основаниями). */
 function motionArgsPs(block) {
   const ps = [];
@@ -394,11 +425,6 @@ function motionArgsPs(block) {
     ps.push(`${endDot(t)}${gr ? ` Это подтверждается: ${gr}.` : ''}`);
   });
   return ps;
-}
-
-/** Черновой текст раздела — вход для промта-редактора ({{text}}). */
-function motionArgsDraft(block) {
-  return motionArgsPs(block).join('\n\n');
 }
 
 /** Применить новые абзацы к блоку доводов. */
@@ -827,7 +853,7 @@ function mwChoiceCheck(el, s) {
 /**
  * Обстоятельства недопустимости по каждой выбранной причине отдельно.
  * Под полем — «Подтверждается»: норма и практика из справочника
- * INADMISSIBILITY_SUPPORT; пока поле пустое, ссылки приглушены, при вводе
+ * INADMISSIBILITY_GROUNDS_MAP; пока поле пустое, ссылки приглушены, при вводе
  * «подтягиваются». В документ они попадают вместе с обстоятельствами.
  */
 function mwFactsPerReason(el, s) {
@@ -896,7 +922,8 @@ function mwFactsPerReason(el, s) {
   }
 
   (common ? [] : reasons).forEach(r => {
-    const support = (typeof INADMISSIBILITY_SUPPORT !== 'undefined' ? INADMISSIBILITY_SUPPORT[r] : null) || [];
+    const support = (((typeof INADMISSIBILITY_GROUNDS_MAP !== 'undefined' ? INADMISSIBILITY_GROUNDS_MAP[r] : null) || {}).norms || [])
+      .map(n => ({ type: 'norm', text: n }));
     const fr = document.createElement('div');
     fr.className = 'mw-fr';
     fr.dataset.reason = r;
@@ -1380,18 +1407,16 @@ async function mwPreview() {
   const built = mwCtx.built;
   const title = mwCtx.def.title(mwCtx);
 
-  // основания недопустимости прогоняются через редактора-нейронку (промт
-  // заказчика): черновая склейка превращается в связный юридический текст.
-  // Без ключа или при незаполненных метках остаётся шаблонная сборка.
+  // основания недопустимости прогоняются через редактора-нейронку: по одному
+  // вызову на каждое доказательство (абзац на доказательство, отбор норм уже
+  // сделан кодом). Без ключа или при незаполненных метках остаётся шаблон.
   const argsBlk = state.blocks.find(b => b.kind === 'motion-args');
   if (argsBlk && argsBlk.rewriteKind === 'inadmissibility'
       && typeof LLM !== 'undefined' && LLM.enabled() && !/ph-mark/.test(argsBlk.generated || '')) {
     try {
-      const out = await thinkWhile('Собираю раздел об основаниях недопустимости нейросетью', () =>
-        LLM.complete(
-          fillPrompt(PROMPTS.inadmUser, { text: motionArgsDraft(argsBlk), stage: stageLabel(argsBlk.motionStage) }),
-          { system: PROMPTS.inadmSystem, maxTokens: 4000 }));
-      applyMotionArgsText(argsBlk, out.split(/\n{2,}/));
+      const ps = await thinkWhile('Собираю раздел об основаниях недопустимости нейросетью', () =>
+        llmInadmParagraphs(argsBlk));
+      applyMotionArgsText(argsBlk, ps);
       renderBlocks();
     } catch (err) {
       addMessage('assistant', `(ИИ недоступен для раздела оснований: ${err.message} — оставлен шаблонный текст.)`);
