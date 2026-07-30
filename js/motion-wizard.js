@@ -515,16 +515,27 @@ function mwMultiGroup(el, s) {
       drawBasket(); syncChecks();
     }));
   };
-  const syncChecks = () => wrap.querySelectorAll('.mw-check').forEach(lab => {
-    const on = picked.has(lab.querySelector('span').textContent);
-    lab.classList.toggle('is-on', on);
-    lab.querySelector('input').checked = on;
-  });
+  const syncChecks = () => {
+    wrap.querySelectorAll('.mw-check').forEach(lab => {
+      const on = picked.has(lab.querySelector('span').textContent);
+      lab.classList.toggle('is-on', on);
+      lab.querySelector('input').checked = on;
+    });
+    // кнопка раздела работает в обе стороны: всё выбрано — предлагает снять
+    wrap.querySelectorAll('.mw-group').forEach(grp => {
+      const btn = grp.querySelector('.mw-all');
+      if (!btn) return;
+      const texts = [...grp.querySelectorAll('.mw-check span')].map(x => x.textContent);
+      btn.textContent = texts.length && texts.every(t => picked.has(t))
+        ? 'Снять всё в разделе' : 'Выбрать всё в разделе';
+    });
+  };
 
   groups.forEach((g, gi) => {
     const items = g.items.map(i => (typeof i === 'string' ? i : i.text));
     const grp = document.createElement('div');
     grp.className = 'mw-group' + (gi === 0 ? ' is-open' : '');
+    grp.dataset.gid = g.id || String(gi);
     grp.innerHTML = `
       <button class="mw-group__head" type="button">
         <span>${g.title}</span><span class="mw-group__count">${items.length}</span>
@@ -544,7 +555,10 @@ function mwMultiGroup(el, s) {
       if (!open) grp.classList.add('is-open');
     });
     grp.querySelector('.mw-all').addEventListener('click', () => {
-      items.forEach(t => picked.add(t));
+      // повторный клик по «Выбрать всё» снимает все галки раздела разом
+      const texts = [...grp.querySelectorAll('.mw-check span')].map(x => x.textContent);
+      const all = texts.length && texts.every(t => picked.has(t));
+      texts.forEach(t => all ? picked.delete(t) : picked.add(t));
       drawBasket(); syncChecks(); showWarn();
     });
     const wireCheck = inp => inp.addEventListener('change', e => {
@@ -592,6 +606,15 @@ function mwMultiGroup(el, s) {
   ok.addEventListener('click', () => {
     if (state.busy) return;
     if (!picked.size && !s.optional) return mwWarn(el, 'Выберите хотя бы один пункт.');
+    // карта «пункт → раздел»: сборка документа делит перечень по разделам
+    // (в том числе пункты, добавленные свободным вводом)
+    const gmap = {};
+    wrap.querySelectorAll('.mw-group').forEach(grp => {
+      grp.querySelectorAll('.mw-check input:checked').forEach(i => {
+        gmap[i.closest('.mw-check').querySelector('span').textContent] = grp.dataset.gid;
+      });
+    });
+    mwCtx.answers[s.key + 'Groups'] = gmap;
     el.querySelectorAll('button, input').forEach(x => x.disabled = true);
     addMessage('user', `Выбрано: ${picked.size}`);
     mwNext([...picked], s.key);
@@ -811,14 +834,26 @@ function mwRequalify(el, s) {
   const fromInput = box.querySelector('[data-k="from"]');
   const varsEl = box.querySelector('.mw-req__vars');
   let opts = [];
-  let picked = null; // объект таблицы либо { manual: true }
+  let picked = null;     // объект таблицы либо { manual: true }
+  let manualArgs = [];   // заготовка доводов для ручной статьи
 
   /** Текущий ответ шага по состоянию контролов (для живой сборки и «Готово»). */
   const collect = () => {
     const ans = { from: fromInput.value.trim(), to: '', thesis: '', args: [] };
     if (!picked) return ans;
     if (picked.manual) {
-      ans.to = ((varsEl.querySelector('.mw-var--manual input') || {}).value || '').trim();
+      const mv = varsEl.querySelector('.mw-var--manual');
+      ans.to = ((mv.querySelector('input[data-k="to"]') || {}).value || '').trim();
+      const th = mv.querySelector('.mw-thesis');
+      ans.thesis = th ? th.innerText.replace(/\s+/g, ' ').trim() : '';
+      ans.args = [...mv.querySelectorAll('.mw-arg')]
+        .filter(a => a.querySelector('input').checked)
+        .map(a => ({
+          text: a.querySelector('.mw-arg__text').innerText.replace(/\s+/g, ' ').trim(),
+          grounds: (manualArgs[+a.dataset.ai] || {}).grounds || [],
+          srcKey: `manual:${a.dataset.ai}`
+        }))
+        .filter(a => a.text);
       return ans;
     }
     const openVar = varsEl.querySelector('.mw-var.is-open');
@@ -880,7 +915,8 @@ function mwRequalify(el, s) {
         </button>
         <div class="mw-var__body">
           <label class="mw-field"><span>Статья, на которую просим переквалифицировать</span><input type="text" data-k="to"></label>
-          <div class="mw-hint">Для статьи вне таблицы тезис и доводы адвокат формулирует сам — в документе останется жёлтая метка.</div>
+          <div class="mw-hint">Введите статью — система предложит заготовку тезиса и доводов; формулировки правятся здесь и слева в конструкторе.</div>
+          <div class="mw-req__manual"></div>
         </div>
       </div>`;
 
@@ -901,7 +937,46 @@ function mwRequalify(el, s) {
     // правка тезиса или текста довода тоже подтягивается (с задержкой)
     varsEl.querySelectorAll('.mw-arg__row input').forEach(i => i.addEventListener('change', () => liveSync(true)));
     varsEl.querySelectorAll('.mw-thesis, .mw-arg__text').forEach(t => t.addEventListener('input', () => liveSync(false)));
-    varsEl.querySelectorAll('.mw-var--manual input').forEach(i => i.addEventListener('input', () => liveSync(false)));
+
+    // ручная статья: система предлагает заготовку тезиса и доводов — так же,
+    // как у вариантов из таблицы (галки, правка, живая сборка)
+    const manualBody = varsEl.querySelector('.mw-req__manual');
+    const manualInput = varsEl.querySelector('.mw-var--manual input');
+    let manualTouched = false;
+    const drawManual = () => {
+      const to = manualInput.value.trim();
+      if (!to || manualTouched) return;
+      const from = fromInput.value.trim();
+      manualArgs = [
+        {
+          text: `Фактические обстоятельства дела не содержат признаков состава преступления, предусмотренного ${from || 'вменённой статьёй'}.`,
+          grounds: [{ type: 'norm', text: 'ст. 73 УПК РФ — обстоятельства, подлежащие доказыванию' }]
+        },
+        {
+          text: `Совершённое деяние охватывается признаками состава преступления, предусмотренного ${to}.`,
+          grounds: [{ type: 'norm', text: to }]
+        }
+      ];
+      manualBody.innerHTML = `
+        <div class="mw-var__cap">Тезис</div>
+        <div class="mw-thesis" contenteditable="true">Квалификация деяния по ${from || 'вменённой статье'} является ошибочной: действия подзащитного подлежат квалификации по ${to}.</div>
+        <div class="mw-var__cap">Доводы</div>
+        ${manualArgs.map((a, ai) => `
+          <div class="mw-arg" data-ai="${ai}">
+            <label class="mw-arg__row">
+              <input type="checkbox" checked>
+              <span class="mw-arg__text" contenteditable="true">${a.text}</span>
+            </label>
+            <div class="mw-arg__grounds">${a.grounds.map(g =>
+              `<div class="mw-gr"><span class="mw-gb mw-gb--${g.type}">${GROUND_LABELS[g.type] || g.type}</span><span>${g.text}</span></div>`).join('')}</div>
+          </div>`).join('')}`;
+      manualBody.querySelectorAll('.mw-arg__row input').forEach(i => i.addEventListener('change', () => liveSync(true)));
+      manualBody.querySelectorAll('.mw-thesis, .mw-arg__text').forEach(t => t.addEventListener('input', () => {
+        manualTouched = true;   // правленую заготовку смена статьи больше не затирает
+        liveSync(false);
+      }));
+    };
+    if (manualInput) manualInput.addEventListener('input', () => { drawManual(); liveSync(false); });
   };
   renderVars();
   // смена вменённой статьи пересчитывает варианты и убирает прежние доводы из документа
@@ -1110,7 +1185,8 @@ function mwExpandPrompt(step, raw) {
     'Ты — помощник адвоката по уголовным делам.',
     'Разверни краткое пояснение адвоката в один связный абзац официально-делового стиля для ходатайства об ознакомлении с материалами уголовного дела.',
     'Пиши от первого лица защитника, без заголовков и вводных фраз. Не выдумывай фактов, дат и номеров. Верни только текст абзаца.',
-    mats ? `Выбранные материалы: ${mats}.` : '',
+    'В документе уже есть вводная часть, реквизиты дела и полный перечень выбранных материалов — НЕ повторяй их: не перечисляй материалы заново, не пересказывай фабулу и реквизиты. Изложи только дополнительное обоснование, которого в документе ещё нет.',
+    mats ? `Уже перечисленные в документе материалы (для сведения, повторять нельзя): ${mats}.` : '',
     `Сведения о деле:\n${caseSummaryForPrompt()}`,
     `Пояснение адвоката: «${raw}»`
   ].filter(Boolean).join('\n');
