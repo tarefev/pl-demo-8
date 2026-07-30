@@ -135,7 +135,7 @@ function mwRunStep() {
     'multi-group': mwMultiGroup, 'text': mwText, 'form': mwForm,
     'evidence': mwEvidence, 'evidence-multi': mwEvidenceMulti,
     'confirm': mwConfirm, 'requalify': mwRequalify,
-    'facts-per-reason': mwFactsPerReason
+    'facts-per-reason': mwFactsPerReason, 'choice-check': mwChoiceCheck
   }[s.type];
   if (render) render(el, s);
   scrollFeed();
@@ -742,58 +742,39 @@ function mwText(el, s) {
 }
 
 /**
- * Мультивыбор доказательств: чекбоксы по карточке дела, у отмеченного
- * раскрываются необязательные том и листы, своё доказательство добавляется
- * строкой ниже. Каждое выбранное доказательство станет отдельным абзацем
+ * Мультивыбор доказательств: чекбоксы по карточке дела, своё доказательство
+ * добавляется строкой ниже. Каждое выбранное станет отдельным абзацем
  * мотивировки (одно доказательство = один абзац).
  */
 function mwEvidenceMulti(el, s) {
   const list = (state.card.evidence || []).map(e => (typeof e === 'string' ? { title: e } : e));
   const box = document.createElement('div');
   box.className = 'mw-evidence mw-evmulti';
-  box.innerHTML = list.map((e, i) => `
-    <label class="mw-check" data-i="${i}"><input type="checkbox"><span>${e.title}</span></label>
-    <div class="mw-evplace" data-for="${i}" hidden>
-      <input type="text" data-k="volume" placeholder="Том — необязательно">
-      <input type="text" data-k="sheets" placeholder="Листы дела — необязательно">
-    </div>`).join('') + `
+  box.innerHTML = list.map(e =>
+    `<label class="mw-check"><input type="checkbox"><span>${e.title}</span></label>`).join('') + `
     <div class="mw-free">
       <input type="text" placeholder="Своё доказательство — если нет в списке">
       <button class="mw-add" type="button">Добавить</button>
     </div>`;
   el.appendChild(box);
 
-  const wirePlace = lab => {
+  const wireCheck = lab => {
     const inp = lab.querySelector('input[type="checkbox"]');
-    inp.addEventListener('change', () => {
-      lab.classList.toggle('is-on', inp.checked);
-      const place = box.querySelector(`.mw-evplace[data-for="${lab.dataset.i}"]`);
-      if (place) place.hidden = !inp.checked;
-    });
+    inp.addEventListener('change', () => lab.classList.toggle('is-on', inp.checked));
   };
-  box.querySelectorAll('.mw-check').forEach(wirePlace);
+  box.querySelectorAll('.mw-check').forEach(wireCheck);
 
-  // своё доказательство добавляется уже отмеченным, со своими полями тома и листов
+  // своё доказательство добавляется уже отмеченным
   const free = box.querySelector('.mw-free');
-  let freeIdx = list.length;
   const addFree = () => {
     const t = free.querySelector('input').value.replace(/\s+/g, ' ').trim();
     if (!t) return;
     const lab = document.createElement('label');
     lab.className = 'mw-check is-on';
-    lab.dataset.i = String(freeIdx);
     lab.innerHTML = `<input type="checkbox" checked><span>${t}</span>`;
-    const place = document.createElement('div');
-    place.className = 'mw-evplace';
-    place.dataset.for = String(freeIdx);
-    place.innerHTML = `
-      <input type="text" data-k="volume" placeholder="Том — необязательно">
-      <input type="text" data-k="sheets" placeholder="Листы дела — необязательно">`;
     free.before(lab);
-    free.before(place);
-    wirePlace(lab);
+    wireCheck(lab);
     free.querySelector('input').value = '';
-    freeIdx += 1;
   };
   free.querySelector('button').addEventListener('click', addFree);
   free.querySelector('input').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addFree(); } });
@@ -805,16 +786,40 @@ function mwEvidenceMulti(el, s) {
     if (state.busy) return;
     const evs = [...box.querySelectorAll('.mw-check')]
       .filter(lab => lab.querySelector('input').checked)
-      .map(lab => {
-        const place = box.querySelector(`.mw-evplace[data-for="${lab.dataset.i}"]`) || document.createElement('div');
-        const val = { title: lab.querySelector('span').textContent };
-        place.querySelectorAll('[data-k]').forEach(i => { if (i.value.trim()) val[i.dataset.k] = i.value.trim(); });
-        return val;
-      });
+      .map(lab => ({ title: lab.querySelector('span').textContent }));
     if (!evs.length) return mwWarn(el, 'Выберите хотя бы одно доказательство.');
     el.querySelectorAll('button, input').forEach(x => x.disabled = true);
     addMessage('user', evs.map(e => e.title).join('; '));
     mwNext(evs, s.key);
+  });
+  el.appendChild(ok);
+}
+
+/** Выбор одного варианта чекбоксами (по макету заказчика) + кнопка «Готово». */
+function mwChoiceCheck(el, s) {
+  const opts = mwVal(s.options, []);
+  const box = document.createElement('div');
+  box.className = 'mw-checkchoice';
+  box.innerHTML = opts.map(o => `<label class="mw-check"><input type="checkbox"><span>${o}</span></label>`).join('');
+  el.appendChild(box);
+
+  let picked = null;
+  box.querySelectorAll('input').forEach((inp, i) => inp.addEventListener('change', () => {
+    // выбор одного: отметка на одном снимает отметку с другого
+    box.querySelectorAll('input').forEach(x => { if (x !== inp) x.checked = false; });
+    box.querySelectorAll('.mw-check').forEach(l => l.classList.toggle('is-on', l.querySelector('input').checked));
+    picked = inp.checked ? opts[i] : null;
+  }));
+
+  const ok = document.createElement('button');
+  ok.className = 'mw-ok'; ok.type = 'button';
+  ok.textContent = 'Готово';
+  ok.addEventListener('click', () => {
+    if (state.busy) return;
+    if (!picked) return mwWarn(el, 'Отметьте один из вариантов.');
+    el.querySelectorAll('button, input').forEach(x => x.disabled = true);
+    addMessage('user', picked);
+    mwNext(picked, s.key);
   });
   el.appendChild(ok);
 }

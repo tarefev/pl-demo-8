@@ -2498,3 +2498,11 @@ body.text-only .doc-generated {
   outline: none;
 }
 .mw-evplace input:focus { border-color: var(--accent); }
+
+/* выбор одного варианта чекбоксами (шаг режима обстоятельств) */
+.mw-checkchoice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0 4px;
+}

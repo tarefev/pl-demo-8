@@ -282,7 +282,7 @@ const MOTION_DEFS = {
       },
       // при нескольких основаниях адвокат выбирает: одно общее обстоятельство
       // или отдельное на каждое основание (при одном основании шаг пропускается)
-      { type: 'choice', key: 'factsMode',
+      { type: 'choice-check', key: 'factsMode',
         q: 'Обстоятельства причин недопустимости доказательства — общие для всех выбранных оснований или отдельные для каждого основания?',
         options: ['Одно общее обстоятельство для всех выбранных оснований', 'Отдельное обстоятельство для каждого основания'],
         when: ctx => (ctx.answers.reasons || []).length > 1 },
@@ -304,7 +304,7 @@ const MOTION_DEFS = {
         q: 'По каким основаниям доказательство является недопустимым?',
         groups: () => INADMISSIBILITY_GROUPS
       },
-      { type: 'choice', key: 'factsMode',
+      { type: 'choice-check', key: 'factsMode',
         q: 'Обстоятельства причин недопустимости доказательства — общие для всех выбранных оснований или отдельные для каждого основания?',
         options: ['Одно общее обстоятельство для всех выбранных оснований', 'Отдельное обстоятельство для каждого основания'],
         when: ctx => (ctx.answers.reasons || []).length > 1 },
@@ -1012,7 +1012,7 @@ function buildInadmissible(ctx, inCourt) {
   const body = [...motionIntro(ctx, { charged: inCourt })];
   const after = inCourt
     ? [NQ.art75_1, NQ.art88_3court, NQ.art235, NQ.art235_5]
-    : [NQ.art75_1, NQ.art75_2_3, NQ.art88_34];
+    : [NQ.art75_1, NQ.art75_2_3];
 
   // общий режим: одно обстоятельство на все основания — отдельным абзацем
   if (commonMode && reasons.length) {
