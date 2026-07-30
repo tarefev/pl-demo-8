@@ -133,7 +133,8 @@ function mwRunStep() {
   const render = {
     'choice': mwChoice, 'choice-group': mwChoiceGroup, 'multi': mwMulti,
     'multi-group': mwMultiGroup, 'text': mwText, 'form': mwForm,
-    'evidence': mwEvidence, 'confirm': mwConfirm, 'requalify': mwRequalify,
+    'evidence': mwEvidence, 'evidence-multi': mwEvidenceMulti,
+    'confirm': mwConfirm, 'requalify': mwRequalify,
     'facts-per-reason': mwFactsPerReason
   }[s.type];
   if (render) render(el, s);
@@ -324,7 +325,10 @@ function mwSyncArgsBlock(built) {
   }
 
   const sig = JSON.stringify([ab.lead, ab.thesis, ab.args.map(a => [a.srcKey || '', a.text, a.tailMark || ''])]);
-  if (!argsBlk) argsBlk = getBlock(insertBlock('', { section: 'facts', kind: 'motion-args' }));
+  if (!argsBlk) {
+    argsBlk = getBlock(insertBlock('', { section: 'facts', kind: 'motion-args' }));
+    argsBlk.constructorDone = true; // создаётся свёрнутым — раскрывается стрелкой
+  }
   if (argsBlk.argsSig !== sig) {
     argsBlk.argsSig = sig;
     argsBlk.leadTitle = ab.lead || 'Доводы';
@@ -334,10 +338,19 @@ function mwSyncArgsBlock(built) {
     const old = argsBlk.argsList || [];
     const list = ab.args.map(a => {
       const prev = a.srcKey ? old.find(o => o.srcKey === a.srcKey) : null;
+      const fresh = (a.grounds || []).map(g => ({ ...g }));
+      const freshSig = JSON.stringify(fresh.map(g => [g.type, g.text]));
+      // прежние основания сохраняются, только если адвокат правил их руками
+      // (состав отличается от автосборки); иначе берём свежие из справочника
+      let grounds = fresh, baseSig = freshSig;
+      if (prev && prev.baseGroundsSig) {
+        const prevNow = JSON.stringify((prev.grounds || []).map(g => [g.type, g.text]));
+        if (prevNow !== prev.baseGroundsSig) { grounds = prev.grounds; baseSig = prev.baseGroundsSig; }
+      }
       return {
         text: a.text, srcKey: a.srcKey || null, tailMark: a.tailMark || '',
         source: null, auto: true, poolIdx: null,
-        grounds: prev ? prev.grounds : (a.grounds || []).map(g => ({ ...g }))
+        grounds, baseGroundsSig: baseSig
       };
     });
     // доводы, добавленные адвокатом вручную слева, остаются в конце
@@ -696,6 +709,84 @@ function mwText(el, s) {
 }
 
 /**
+ * Мультивыбор доказательств: чекбоксы по карточке дела, у отмеченного
+ * раскрываются необязательные том и листы, своё доказательство добавляется
+ * строкой ниже. Каждое выбранное доказательство станет отдельным абзацем
+ * мотивировки (одно доказательство = один абзац).
+ */
+function mwEvidenceMulti(el, s) {
+  const list = (state.card.evidence || []).map(e => (typeof e === 'string' ? { title: e } : e));
+  const box = document.createElement('div');
+  box.className = 'mw-evidence mw-evmulti';
+  box.innerHTML = list.map((e, i) => `
+    <label class="mw-check" data-i="${i}"><input type="checkbox"><span>${e.title}</span></label>
+    <div class="mw-evplace" data-for="${i}" hidden>
+      <input type="text" data-k="volume" placeholder="Том — необязательно">
+      <input type="text" data-k="sheets" placeholder="Листы дела — необязательно">
+    </div>`).join('') + `
+    <div class="mw-free">
+      <input type="text" placeholder="Своё доказательство — если нет в списке">
+      <button class="mw-add" type="button">Добавить</button>
+    </div>`;
+  el.appendChild(box);
+
+  const wirePlace = lab => {
+    const inp = lab.querySelector('input[type="checkbox"]');
+    inp.addEventListener('change', () => {
+      lab.classList.toggle('is-on', inp.checked);
+      const place = box.querySelector(`.mw-evplace[data-for="${lab.dataset.i}"]`);
+      if (place) place.hidden = !inp.checked;
+    });
+  };
+  box.querySelectorAll('.mw-check').forEach(wirePlace);
+
+  // своё доказательство добавляется уже отмеченным, со своими полями тома и листов
+  const free = box.querySelector('.mw-free');
+  let freeIdx = list.length;
+  const addFree = () => {
+    const t = free.querySelector('input').value.replace(/\s+/g, ' ').trim();
+    if (!t) return;
+    const lab = document.createElement('label');
+    lab.className = 'mw-check is-on';
+    lab.dataset.i = String(freeIdx);
+    lab.innerHTML = `<input type="checkbox" checked><span>${t}</span>`;
+    const place = document.createElement('div');
+    place.className = 'mw-evplace';
+    place.dataset.for = String(freeIdx);
+    place.innerHTML = `
+      <input type="text" data-k="volume" placeholder="Том — необязательно">
+      <input type="text" data-k="sheets" placeholder="Листы дела — необязательно">`;
+    free.before(lab);
+    free.before(place);
+    wirePlace(lab);
+    free.querySelector('input').value = '';
+    freeIdx += 1;
+  };
+  free.querySelector('button').addEventListener('click', addFree);
+  free.querySelector('input').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addFree(); } });
+
+  const ok = document.createElement('button');
+  ok.className = 'mw-ok'; ok.type = 'button';
+  ok.textContent = 'Готово';
+  ok.addEventListener('click', () => {
+    if (state.busy) return;
+    const evs = [...box.querySelectorAll('.mw-check')]
+      .filter(lab => lab.querySelector('input').checked)
+      .map(lab => {
+        const place = box.querySelector(`.mw-evplace[data-for="${lab.dataset.i}"]`) || document.createElement('div');
+        const val = { title: lab.querySelector('span').textContent };
+        place.querySelectorAll('[data-k]').forEach(i => { if (i.value.trim()) val[i.dataset.k] = i.value.trim(); });
+        return val;
+      });
+    if (!evs.length) return mwWarn(el, 'Выберите хотя бы одно доказательство.');
+    el.querySelectorAll('button, input').forEach(x => x.disabled = true);
+    addMessage('user', evs.map(e => e.title).join('; '));
+    mwNext(evs, s.key);
+  });
+  el.appendChild(ok);
+}
+
+/**
  * Обстоятельства недопустимости по каждой выбранной причине отдельно.
  * Под полем — «Подтверждается»: норма и практика из справочника
  * INADMISSIBILITY_SUPPORT; пока поле пустое, ссылки приглушены, при вводе
@@ -711,7 +802,8 @@ function mwFactsPerReason(el, s) {
     const val = {};
     box.querySelectorAll('.mw-fr').forEach(fr => {
       const t = fr.querySelector('.mw-input').innerText.replace(/\s+/g, ' ').trim();
-      if (t) val[fr.dataset.reason] = t;
+      if (fr.dataset.common) { if (t) val.__common = t; }
+      else if (t) val[fr.dataset.reason] = t;
     });
     return val;
   };
@@ -727,7 +819,45 @@ function mwFactsPerReason(el, s) {
   if (!reasons.length) {
     box.innerHTML = '<div class="mw-hint">Основания недопустимости не выбраны — вернитесь на шаг назад и отметьте их.</div>';
   }
-  reasons.forEach(r => {
+
+  // общий режим: одно поле обстоятельств сразу на все выбранные основания,
+  // сами основания показываются списком над полем
+  const common = /Одно общее/.test(mwCtx.answers.factsMode || '');
+  if (common && reasons.length) {
+    const fr = document.createElement('div');
+    fr.className = 'mw-fr';
+    fr.dataset.common = '1';
+    fr.innerHTML = `
+      <div class="mw-var__cap">Выбранные основания</div>
+      ${reasons.map(r => `<div class="mw-gr"><span>— ${r}</span></div>`).join('')}
+      <div class="mw-fr__reason" style="margin-top:8px">Общие обстоятельства</div>
+      <div class="mw-input" contenteditable="true" data-ph="Обстоятельства, относящиеся ко всем основаниям…"></div>
+      <div class="mw-fr__actions"><button class="mw-add" type="button">Развернуть с помощью ИИ</button></div>`;
+    const input = fr.querySelector('.mw-input');
+    input.addEventListener('input', () => liveSync(false));
+    const ai = fr.querySelector('.mw-fr__actions button');
+    ai.addEventListener('click', async () => {
+      const raw = input.innerText.replace(/\s+/g, ' ').trim();
+      if (!raw) return mwWarn(el, 'Сначала кратко напишите обстоятельства — ИИ развернёт их до абзаца.');
+      ai.disabled = true; ai.textContent = 'Разворачиваю…';
+      try {
+        if (typeof LLM !== 'undefined' && LLM.enabled()) {
+          const out = await LLM.complete(mwExpandReasonPrompt(reasons.join('; '), raw), { maxTokens: 1500 });
+          input.innerText = out.trim();
+        } else {
+          await new Promise(res => setTimeout(res, 1200));
+          input.innerText = mwExpandReasonFallback(raw);
+        }
+        liveSync(true);
+      } catch (err) {
+        mwWarn(el, `ИИ недоступен: ${err.message}. Текст оставлен как есть.`);
+      }
+      ai.disabled = false; ai.textContent = 'Развернуть с помощью ИИ';
+    });
+    box.appendChild(fr);
+  }
+
+  (common ? [] : reasons).forEach(r => {
     const support = (typeof INADMISSIBILITY_SUPPORT !== 'undefined' ? INADMISSIBILITY_SUPPORT[r] : null) || [];
     const fr = document.createElement('div');
     fr.className = 'mw-fr';
@@ -782,14 +912,20 @@ function mwFactsPerReason(el, s) {
     if (state.busy) return;
     clearTimeout(liveTimer);
     const val = collect();
-    const missing = reasons.filter(r => !val[r]);
+    const missing = common
+      ? (val.__common ? [] : ['общие обстоятельства'])
+      : reasons.filter(r => !val[r]);
     if (missing.length && !warned) {
       warned = true;
       ok.textContent = 'Всё равно продолжить';
-      return mwWarn(el, `Обстоятельства не изложены: ${missing.map(m => `«${m.split(' (')[0].toLowerCase()}»`).join(', ')}. Заполните или нажмите ещё раз — в документе останутся жёлтые метки.`);
+      return mwWarn(el, common
+        ? 'Общие обстоятельства не изложены. Заполните поле или нажмите ещё раз — в документе останется жёлтая метка.'
+        : `Обстоятельства не изложены: ${missing.map(m => `«${m.split(' (')[0].toLowerCase()}»`).join(', ')}. Заполните или нажмите ещё раз — в документе останутся жёлтые метки.`);
     }
     el.querySelectorAll('button, .mw-input').forEach(x => { x.disabled = true; x.contentEditable = 'false'; });
-    addMessage('user', Object.keys(val).length ? `Обстоятельства изложены: ${Object.keys(val).length} из ${reasons.length}` : 'Пропустить');
+    addMessage('user', common
+      ? (val.__common ? 'Общие обстоятельства изложены' : 'Пропустить')
+      : (Object.keys(val).length ? `Обстоятельства изложены: ${Object.keys(val).length} из ${reasons.length}` : 'Пропустить'));
     mwNext(val, s.key);
   });
   el.appendChild(ok);

@@ -274,13 +274,18 @@ const MOTION_DEFS = {
   inadmissible: {
     title: () => 'Ходатайство о признании доказательства недопустимым',
     steps: [
-      { type: 'evidence', key: 'ev', q: 'Какое доказательство необходимо признать недопустимым?', needPlace: true },
+      { type: 'evidence-multi', key: 'evs', q: 'Какие доказательства необходимо признать недопустимыми?' },
       {
         type: 'multi-group', key: 'reasons',
         q: 'По каким основаниям доказательство является недопустимым?',
         groups: () => INADMISSIBILITY_GROUPS
       },
-      // обстоятельства излагаются по каждому выбранному основанию отдельно;
+      // при нескольких основаниях адвокат выбирает: одно общее обстоятельство
+      // или отдельное на каждое основание (при одном основании шаг пропускается)
+      { type: 'choice', key: 'factsMode',
+        q: 'Обстоятельства причин недопустимости доказательства — общие для всех выбранных оснований или отдельные для каждого основания?',
+        options: ['Одно общее обстоятельство для всех выбранных оснований', 'Отдельное обстоятельство для каждого основания'],
+        when: ctx => (ctx.answers.reasons || []).length > 1 },
       // нормативная база и практика подтягиваются из справочника
       { type: 'facts-per-reason', key: 'factsBy',
         q: 'Изложите обстоятельства причин недопустимости доказательств(а).' }
@@ -293,12 +298,16 @@ const MOTION_DEFS = {
     title: () => 'Ходатайство об исключении доказательства',
     forceStage: 'court',
     steps: [
-      { type: 'evidence', key: 'ev', q: 'Какое доказательство должно быть исключено?', needPlace: true },
+      { type: 'evidence-multi', key: 'evs', q: 'Какие доказательства должны быть исключены?' },
       {
         type: 'multi-group', key: 'reasons',
         q: 'По каким основаниям доказательство является недопустимым?',
         groups: () => INADMISSIBILITY_GROUPS
       },
+      { type: 'choice', key: 'factsMode',
+        q: 'Обстоятельства причин недопустимости доказательства — общие для всех выбранных оснований или отдельные для каждого основания?',
+        options: ['Одно общее обстоятельство для всех выбранных оснований', 'Отдельное обстоятельство для каждого основания'],
+        when: ctx => (ctx.answers.reasons || []).length > 1 },
       { type: 'facts-per-reason', key: 'factsBy',
         q: 'Изложите обстоятельства причин недопустимости доказательств(а).' }
     ],
@@ -993,60 +1002,78 @@ const MOTION_DEFS = {
 /** Общая сборка для недопустимости и исключения (архетип B). */
 function buildInadmissible(ctx, inCourt) {
   const c = motionCase();
-  const ev = ctx.answers.ev || {};
-  const ref = evidenceRef(ev);
+  const evs = ctx.answers.evs || (ctx.answers.ev ? [ctx.answers.ev] : []);
+  const refs = evs.map(evidenceRef);
   const reasons = ctx.answers.reasons || [];
   const factsBy = ctx.answers.factsBy || {};
+  const commonMode = /Одно общее/.test(ctx.answers.factsMode || '') || '__common' in factsBy;
+  const common = (factsBy.__common || '').trim();
 
-  const body = [
-    ...motionIntro(ctx, { charged: inCourt }),
-    `В материалах уголовного дела в качестве доказательства стороны обвинения представлено: ${ref}.`,
-    'Указанное доказательство является недопустимым по следующим основаниям.'
-  ];
+  const body = [...motionIntro(ctx, { charged: inCourt })];
   const after = inCourt
     ? [NQ.art75_1, NQ.art88_3court, NQ.art235, NQ.art235_5]
     : [NQ.art75_1, NQ.art75_2_3, NQ.art88_34];
 
-  // основания — конструкторный блок (как в апелляции): основание + обстоятельства
-  // адвоката, «Подтверждается» из справочника; нормы и практику можно убирать
-  // и добавлять слева в конструкторе
-  const args = reasons.map(r => {
-    const t = (factsBy[r] || '').trim();
-    return {
-      text: t ? `${endDot(r)} ${endDot(t.charAt(0).toUpperCase() + t.slice(1))}` : endDot(r),
-      tailMark: t ? '' : mMark('изложить обстоятельства по этому основанию'),
-      grounds: (typeof INADMISSIBILITY_SUPPORT !== 'undefined' ? INADMISSIBILITY_SUPPORT[r] : null) || [],
-      srcKey: r
-    };
-  });
-  if (!reasons.length) body.push(mMark('выбрать основания недопустимости и изложить обстоятельства'), ...after);
+  // общий режим: одно обстоятельство на все основания — отдельным абзацем
+  if (commonMode && reasons.length) {
+    body.push(`Доказательства получены при следующих обстоятельствах, свидетельствующих о их недопустимости: ${
+      common ? endDot(common.charAt(0).toUpperCase() + common.slice(1)) : mMark('изложить общие обстоятельства')}`);
+  }
 
+  // основания единым перечнем внутри абзаца; в раздельном режиме — со своими
+  // обстоятельствами в скобках
+  const lc = t => t.charAt(0).toLowerCase() + t.slice(1);
+  const reasonsInline = reasons.map(r => {
+    if (commonMode) return lc(r);
+    const t = (factsBy[r] || '').trim();
+    return `${lc(r)} (${t ? endDot(t.charAt(0).toLowerCase() + t.slice(1)) : mMark('изложить обстоятельства')})`;
+  }).join('; ');
+
+  // «Подтверждается» — объединение справочника по всем выбранным основаниям
+  const support = [];
+  reasons.forEach(r => ((typeof INADMISSIBILITY_SUPPORT !== 'undefined' ? INADMISSIBILITY_SUPPORT[r] : null) || [])
+    .forEach(g => { if (!support.some(x => x.text === g.text)) support.push(g); }));
+
+  // один абзац на каждое доказательство (сколько доказательств — столько абзацев)
+  const args = evs.map((ev, i) => ({
+    text: `${evidenceRef(ev)} является недопустимым доказательством по следующим основаниям: ${reasonsInline || mMark('выбрать основания недопустимости')}.`,
+    tailMark: '',
+    grounds: support,
+    srcKey: `ev:${ev.title || i}`
+  }));
+  if (!evs.length) body.push(mMark('выбрать доказательства'), ...after);
+
+  const many = refs.length > 1;
+  const refsText = refs.length ? refs.join('; ') : mMark('указать доказательство');
   const plea = inCourt
-    ? [`Признать ${ref} недопустимым доказательством по уголовному делу ${c.num}.`,
-       'Исключить указанное доказательство из перечня доказательств, представленных стороной обвинения, и не исследовать его в ходе судебного разбирательства.',
-       'Не учитывать исключённое доказательство при вынесении приговора или иного итогового судебного решения по уголовному делу.']
-    : [`Признать ${ref} недопустимым доказательством по уголовному делу ${c.num}.`,
-       'Исключить указанное доказательство из числа доказательств, собранных по уголовному делу, и не учитывать его при принятии решений по делу, в том числе при составлении обвинительного заключения (обвинительного акта) и вынесении итогового судебного решения.',
+    ? [`Признать ${refsText} недопустимым${many ? 'и доказательствами' : ' доказательством'} по уголовному делу ${c.num}.`,
+       `Исключить указанн${many ? 'ые доказательства' : 'ое доказательство'} из перечня доказательств, представленных стороной обвинения, и не исследовать ${many ? 'их' : 'его'} в ходе судебного разбирательства.`,
+       `Не учитывать исключённ${many ? 'ые доказательства' : 'ое доказательство'} при вынесении приговора или иного итогового судебного решения по уголовному делу.`]
+    : [`Признать ${refsText} недопустимым${many ? 'и доказательствами' : ' доказательством'} по уголовному делу ${c.num}.`,
+       `Исключить указанн${many ? 'ые доказательства' : 'ое доказательство'} из числа доказательств, собранных по уголовному делу, и не учитывать ${many ? 'их' : 'его'} при принятии решений по делу, в том числе при составлении обвинительного заключения (обвинительного акта) и вынесении итогового судебного решения.`,
        `О принятом решении уведомить защитника и ${clientRole(ctx)} в установленном законом порядке.`];
 
   // ордер в суде не прилагается — защитник уже участвует в деле
   const attachments = [
-    `${mVal(ev.title, 'наименование доказательства')} (копия) — на ${mMark('количество')} л. в 1 экз.`,
+    ...(evs.length
+      ? evs.map(ev => `${ev.title} (копия) — на ${mMark('количество')} л. в 1 экз.`)
+      : [`${mMark('наименование доказательства')} (копия) — на ${mMark('количество')} л. в 1 экз.`]),
     `Документы, подтверждающие изложенные нарушения, — на ${mMark('количество')} л. в 1 экз.`
   ];
   if (!inCourt) attachments.push(orderAtt());
 
+  const factsOk = reasons.length > 0 && (commonMode ? !!common : reasons.every(r => (factsBy[r] || '').trim()));
   return {
     body, plea, attachments,
-    bodyAfter: reasons.length ? after : null,
-    argsBlock: reasons.length
+    bodyAfter: evs.length ? after : null,
+    argsBlock: evs.length
       ? { lead: 'Основания недопустимости', line: 'Недопустимость доказательства (ст. 75 УПК РФ)', thesis: '', args }
       : null,
     norms: [...(inCourt ? MOTION_NORMS.exclude : MOTION_NORMS.inadmissible), ...MOTION_NORMS.common],
     checklist: [
-      { label: 'Указано доказательство', ok: !!(ev.title || '').trim() },
+      { label: 'Указаны доказательства', ok: evs.length > 0 },
       { label: 'Выбраны основания', ok: reasons.length > 0 },
-      { label: 'Обстоятельства изложены по каждому основанию', ok: reasons.length > 0 && reasons.every(r => (factsBy[r] || '').trim()) }
+      { label: commonMode ? 'Изложены общие обстоятельства' : 'Обстоятельства изложены по каждому основанию', ok: factsOk }
     ]
   };
 }

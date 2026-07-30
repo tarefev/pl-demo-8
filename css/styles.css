@@ -2480,3 +2480,21 @@ body.text-only .doc-generated {
   font-size: 12pt;
   line-height: 1.5;
 }
+
+/* поля тома и листов у выбранного доказательства (мультивыбор) */
+.mw-evplace {
+  display: flex;
+  gap: 6px;
+  margin: 2px 0 8px 24px;
+}
+.mw-evplace input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.mw-evplace input:focus { border-color: var(--accent); }
