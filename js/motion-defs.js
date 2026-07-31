@@ -1067,8 +1067,7 @@ function buildInadmissible(ctx, inCourt) {
     body, plea, attachments,
     bodyAfter: evs.length ? after : null,
     argsBlock: evs.length
-      ? { lead: 'Основания недопустимости', line: 'Недопустимость доказательства (ст. 75 УПК РФ)', thesis: '', args,
-          rewriteKind: 'inadmissibility' }
+      ? { lead: 'Основания недопустимости', line: 'Недопустимость доказательства (ст. 75 УПК РФ)', thesis: '', args }
       : null,
     norms: [...(inCourt ? MOTION_NORMS.exclude : MOTION_NORMS.inadmissible), ...MOTION_NORMS.common],
     checklist: [

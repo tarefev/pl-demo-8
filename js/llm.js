@@ -43,15 +43,15 @@ const LLM = {
 
   enabled() { return !!this.key; },
 
-  /** Один запрос: system + user, возвращает текст ответа. opts.system — своя системная роль. */
-  async complete(userPrompt, { temperature = 0.3, maxTokens = 4000, system } = {}) {
+  /** Один запрос: system + user, возвращает текст ответа. */
+  async complete(userPrompt, { temperature = 0.3, maxTokens = 4000 } = {}) {
     // gpt-5-* и o-*: max_completion_tokens (включая reasoning-токены!), temperature не передаём,
     // reasoning_effort=low, чтобы бюджет уходил в текст, а не в размышления
     const reasoning = /^(gpt-5|o\d)/.test(this.model);
     const body = {
       model: this.model,
       messages: [
-        { role: 'system', content: system || PROMPTS.system },
+        { role: 'system', content: PROMPTS.system },
         { role: 'user', content: userPrompt }
       ]
     };

@@ -1141,33 +1141,6 @@ function markDirty(block, what, partKey) {
 async function onRegenerateClick(block) {
   if (state.busy || !block.dirty) return;
 
-  // блок доводов визарда ходатайств: пересборка в свой формат; для оснований
-  // недопустимости с нейронкой — редактор по промту заказчика ({{text}}, {{stage}})
-  if (block.kind === 'motion-args') {
-    if (block.rewriteKind === 'inadmissibility' && typeof LLM !== 'undefined' && LLM.enabled()) {
-      try {
-        const out = await thinkWhile('Переписываю раздел об основаниях недопустимости нейросетью', () =>
-          LLM.complete(
-            fillPrompt(PROMPTS.inadmUser, { text: motionArgsDraft(block), stage: stageLabel(block.motionStage) }),
-            { system: PROMPTS.inadmSystem, maxTokens: 4000 }));
-        applyMotionArgsText(block, out.split(/\n{2,}/));
-        addMessage('assistant', 'Раздел об основаниях недопустимости переписан нейросетью по данным конструктора.');
-      } catch (err) {
-        applyMotionArgsText(block, motionArgsPs(block));
-        addMessage('assistant', `(ИИ недоступен: ${err.message} — текст собран по шаблону.)`);
-      }
-    } else {
-      await think(`Перегенерирую текст ${labelGen(block.label)}`, 1500);
-      applyMotionArgsText(block, motionArgsPs(block));
-      addMessage('assistant', `Текст ${labelGen(block.label)} перегенерирован по данным конструктора.`);
-    }
-    block.dirty = false;
-    block.dirtyNotified = false;
-    renderBlocks();
-    flashBlock(block.id);
-    return;
-  }
-
   // с подключённой нейронкой — складный юридический текст по данным конструктора,
   // включая содержание нормативных актов; без неё — шаблонная сборка
   if (typeof LLM !== 'undefined' && LLM.enabled()) {
