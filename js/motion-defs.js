@@ -1020,45 +1020,27 @@ function buildInadmissible(ctx, inCourt) {
       common ? endDot(common.charAt(0).toUpperCase() + common.slice(1)) : mMark('изложить общие обстоятельства')}`);
   }
 
-  // один абзац на каждое доказательство. Основания проходят ГЕЙТ совместимости:
-  // остаются только применимые к типу доказательства (тип × основание);
-  // нормы = безусловные COMMON + нормы прошедших оснований, с дедупликацией.
-  // Отбор делает код — редактор-нейросеть нормы не отбирает.
+  // основания единым перечнем внутри абзаца; в раздельном режиме — со своими
+  // обстоятельствами в скобках
   const lc = t => t.charAt(0).toLowerCase() + t.slice(1);
-  const args = [];
-  const rejected = [];
-  evs.forEach((ev, i) => {
-    const evType = evidenceTypeOf(ev.title);
-    const applicable = reasons.filter(r => {
-      const g = INADMISSIBILITY_GROUNDS_MAP[r];
-      if (!g || !g.types || !evType) return true; // основание ко всем либо тип неизвестен (TEMP)
-      return g.types.includes(evType);
-    });
-    // все выбранные основания не подходят типу — блок доказательства не рендерим
-    if (reasons.length && !applicable.length) { rejected.push(ev.title); return; }
+  const reasonsInline = reasons.map(r => {
+    if (commonMode) return lc(r);
+    const t = (factsBy[r] || '').trim();
+    return `${lc(r)} (${t ? endDot(t.charAt(0).toLowerCase() + t.slice(1)) : mMark('изложить обстоятельства')})`;
+  }).join('; ');
 
-    const norms = [...INADMISSIBILITY_COMMON_NORMS];
-    applicable.forEach(r => ((INADMISSIBILITY_GROUNDS_MAP[r] || {}).norms || [])
-      .forEach(n => { if (!norms.includes(n)) norms.push(n); }));
+  // «Подтверждается» — объединение справочника по всем выбранным основаниям
+  const support = [];
+  reasons.forEach(r => ((typeof INADMISSIBILITY_SUPPORT !== 'undefined' ? INADMISSIBILITY_SUPPORT[r] : null) || [])
+    .forEach(g => { if (!support.some(x => x.text === g.text)) support.push(g); }));
 
-    const inline = applicable.map(r => {
-      if (commonMode) return lc(r);
-      const t = (factsBy[r] || '').trim();
-      return `${lc(r)} (${t ? endDot(t.charAt(0).toLowerCase() + t.slice(1)) : mMark('изложить обстоятельства')})`;
-    }).join('; ');
-    const facts = commonMode
-      ? common
-      : applicable.map(r => (factsBy[r] || '').trim() ? `${r}: ${(factsBy[r] || '').trim()}` : '').filter(Boolean).join('\n');
-
-    args.push({
-      text: `${evidenceRef(ev)} является недопустимым доказательством по следующим основаниям: ${inline || mMark('выбрать основания недопустимости')}.`,
-      tailMark: '',
-      grounds: norms.map(n => ({ type: 'norm', text: n })),
-      srcKey: `ev:${ev.title || i}`,
-      // payload редактора-нейросети: отобранное кодом, по одному доказательству
-      gate: { evidence: ev.title || '', grounds: applicable, norms, facts }
-    });
-  });
+  // один абзац на каждое доказательство (сколько доказательств — столько абзацев)
+  const args = evs.map((ev, i) => ({
+    text: `${evidenceRef(ev)} является недопустимым доказательством по следующим основаниям: ${reasonsInline || mMark('выбрать основания недопустимости')}.`,
+    tailMark: '',
+    grounds: support,
+    srcKey: `ev:${ev.title || i}`
+  }));
   if (!evs.length) body.push(mMark('выбрать доказательства'), ...after);
 
   const many = refs.length > 1;
@@ -1086,10 +1068,7 @@ function buildInadmissible(ctx, inCourt) {
     bodyAfter: evs.length ? after : null,
     argsBlock: evs.length
       ? { lead: 'Основания недопустимости', line: 'Недопустимость доказательства (ст. 75 УПК РФ)', thesis: '', args,
-          rewriteKind: 'inadmissibility',
-          gateNote: rejected.length
-            ? `Выбранные основания не соответствуют типу доказательства: ${rejected.join('; ')}`
-            : '' }
+          rewriteKind: 'inadmissibility' }
       : null,
     norms: [...(inCourt ? MOTION_NORMS.exclude : MOTION_NORMS.inadmissible), ...MOTION_NORMS.common],
     checklist: [
