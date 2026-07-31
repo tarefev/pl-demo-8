@@ -2499,13 +2499,6 @@ body.text-only .doc-generated {
 }
 .mw-evplace input:focus { border-color: var(--accent); }
 
-/* выбор одного варианта чекбоксами (шаг режима обстоятельств) */
-.mw-checkchoice {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 10px 0 4px;
-}
 
 /* --- Подбор переквалификации по справочнику --- */
 .mw-var__note {
