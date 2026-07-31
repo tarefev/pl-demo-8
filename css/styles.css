@@ -2506,3 +2506,29 @@ body.text-only .doc-generated {
   gap: 6px;
   margin: 10px 0 4px;
 }
+
+/* --- Подбор переквалификации по справочнику --- */
+.mw-var__note {
+  display: block;
+  width: 100%;
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-top: 2px;
+}
+.mw-req__koap-cap {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #9a6b00;
+  margin: 12px 0 2px;
+}
+.mw-var--koap { border-style: dashed; }
+.mw-req__split { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.mw-req__disclaimer {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  margin-top: 10px;
+}
+.mw-field input.is-invalid { border-color: var(--danger); }

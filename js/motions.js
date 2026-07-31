@@ -530,24 +530,145 @@ const INADMISSIBILITY_COMMON_NORMS = [
   'ст. 89 УПК РФ'
 ];
 
-/* ================= Таблица переквалификации ================= */
+/* ================= Переквалификация: подбор по справочнику ================= */
 
 /**
- * Варианты переквалификации по вменённой статье: тезис и доводы, каждый довод
- * подкреплён основанием — доказательством, нормой или практикой (как конструктор
- * линии «Переквалификация» в апелляционной жалобе, но показывается в чате).
- *
- * ДЕМО-таблица под фабулу стенда (ст. 161 УК РФ); будет заменена таблицей
- * партнёра-адвоката, когда её пришлют. Ключ match — регулярка по вменённой статье.
+ * Варианты статей формируются СТРОГО из справочника REQUALIFICATION_MAP
+ * (js/requalification-map.js) плюс универсальный вариант «покушение».
+ * Никаких вариантов «из головы» или захардкоженных в интерфейсе.
  */
-const REQUALIFY_TABLE = [
-  {
-    match: /ст\.?\s*161/i,
-    options: [
+
+/** Нормализация обозначения статьи → ключ справочника («ч.1 ст.161»). */
+function reqNormOne(fragment) {
+  const s = String(fragment || '').toLowerCase().replace(/ё/g, 'е')
+    .replace(/[«»"]/g, '').replace(/ук\s*рф|коап\s*рф|\bук\b|\bкоап\b/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+  const art = /ст\.?\s*ст\.?\s*(\d+(?:\.\d+)?)|ст\.?\s*(\d+(?:\.\d+)?)/.exec(s);
+  if (!art) return null;
+  const artNum = art[1] || art[2];
+  const part = /ч\.?\s*(\d+(?:\.\d+)?)/.exec(s);
+  // пункты ищем только в начале фрагмента, до «ч.» и «ст.»
+  const head = s.slice(0, s.search(/ч\.|ст\./) >= 0 ? s.search(/ч\.|ст\./) : s.length);
+  const pts = /п\.?\s*п?\.?\s*([а-я](?:\s*[-,–—]\s*[а-я])*)/.exec(head);
+  const ptsNorm = pts ? pts[1].replace(/\s*[-–—]\s*/g, '-').replace(/\s*,\s*/g, ',').replace(/\s+/g, '') : null;
+  return {
+    key: [ptsNorm ? `п.${ptsNorm}` : '', part ? `ч.${part[1]}` : '', `ст.${artNum}`].filter(Boolean).join(' '),
+    art: artNum,
+    part: part ? part[1] : null
+  };
+}
+
+/**
+ * Разбор поля «Вменённая статья»: префикс неоконченного преступления
+ * (ч. 3 / ч. 1 ст. 30) отделяется, совокупность статей разбивается по статьям.
+ * Парсер не должен падать ни на каком вводе.
+ */
+function reqParse(input) {
+  const s = String(input || '');
+  const frags = [];
+  const re = /(?:п\.?\s*п?\.?\s*[«»"]?[а-яё][«»"]?(?:\s*[-,–—]\s*[«»"]?[а-яё][«»"]?)*)?[^,]*?ст\.?\s*\d+(?:\.\d+)?/gi;
+  let m;
+  while ((m = re.exec(s)) !== null) frags.push(m[0]);
+  const parsed = frags.map(reqNormOne).filter(Boolean);
+  let stagePrefix = '';
+  if (parsed.length && parsed[0].art === '30') {
+    stagePrefix = parsed[0].part === '1' ? 'ч. 1 ст. 30' : 'ч. 3 ст. 30';
+    parsed.shift();
+  }
+  return { stagePrefix, parts: parsed };
+}
+
+/** Поиск записи справочника по алгоритму ТЗ (точный ключ → алиасы → без пунктов → без части). */
+function reqFindEntry(key) {
+  const M = typeof REQUALIFICATION_MAP !== 'undefined' ? REQUALIFICATION_MAP : { entries: {}, aliases: {} };
+  const E = M.entries || {}, A = M.aliases || {};
+  const direct = k => E[k] ? { key: k, entry: E[k] } : (A[k] && E[A[k]] ? { key: A[k], entry: E[A[k]] } : null);
+  let hit = direct(key);
+  if (hit) return hit;
+  // отбрасывание пунктов: «п.а ч.2 ст.105» → «ч.2 ст.105» → пунктовая запись той же пары
+  const noPts = key.replace(/^п\.[^ ]+ /, '');
+  if (noPts !== key) {
+    hit = direct(noPts);
+    if (hit) return hit;
+    const cover = Object.keys(E).find(k => k.endsWith(' ' + noPts));
+    if (cover) return { key: cover, entry: E[cover] };
+  } else {
+    const cover = Object.keys(E).find(k => k.endsWith(' ' + key));
+    if (cover) return { key: cover, entry: E[cover] };
+  }
+  // отбрасывание части: «ч.X ст.Y» → «ст.Y»
+  const stOnly = (key.match(/ст\.[\d.]+$/) || [])[0];
+  if (stOnly && stOnly !== key) {
+    hit = direct(stOnly);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/** Подпись варианта: название статьи из titles_uk / titles_koap. */
+function reqTitleFor(key, code, attempted) {
+  const M = typeof REQUALIFICATION_MAP !== 'undefined' ? REQUALIFICATION_MAP : {};
+  const num = (String(key).match(/ст\.([\d.]+)$/) || [])[1];
+  const title = code === 'КоАП' ? (M.titles_koap || {})[num] : (M.titles_uk || {})[num];
+  if (!title) return attempted ? 'Покушение' : '';
+  return attempted ? `Покушение: ${title.charAt(0).toLowerCase()}${title.slice(1)}` : title;
+}
+
+/**
+ * Подбор вариантов переквалификации по введённой статье.
+ * Возвращает { status, stagePrefix, display, parts, uk, koap, note }:
+ *   status: 'ok' | 'base' (базовый состав) | 'none' (нет в справочнике) |
+ *           'multi' (совокупность — нужен выбор статьи) | 'invalid' (не распознано)
+ */
+function reqSuggestions(input) {
+  const p = reqParse(input);
+  if (!p.parts.length) return { status: 'invalid', stagePrefix: '', uk: [], koap: [] };
+  if (p.parts.length > 1) return { status: 'multi', stagePrefix: p.stagePrefix, parts: p.parts, uk: [], koap: [] };
+
+  const one = p.parts[0];
+  const found = reqFindEntry(one.key);
+  const display = found ? found.entry.display : `ст. ${one.art}${one.part ? '' : ''} УК РФ`;
+  if (!found) return { status: 'none', stagePrefix: p.stagePrefix, display, uk: [], koap: [] };
+
+  const uk = [];
+  const koap = [];
+  (found.entry.suggestions || []).forEach(sug => {
+    if (sug.code === 'КоАП') {
+      // при неоконченном преступлении варианты КоАП не выводятся
+      if (!p.stagePrefix) koap.push({ ...sug, title: reqTitleFor(sug.key, 'КоАП') });
+      return;
+    }
+    const article = p.stagePrefix ? `${p.stagePrefix.replace('ст. 30', 'ст. 30,')} ${sug.article}` : sug.article;
+    uk.push({ ...sug, article, title: reqTitleFor(sug.key, 'УК', !!p.stagePrefix) });
+  });
+
+  // универсальный вариант «покушение на вменённую статью» — если вменено оконченное
+  if (!p.stagePrefix) {
+    const attempt = `ч. 3 ст. 30, ${found.entry.display}`;
+    if (!uk.some(x => x.article === attempt)) {
+      uk.push({ article: attempt, key: `ч.3 ст.30, ${found.key}`, code: 'УК',
+        title: reqTitleFor(found.key, 'УК', true), universal: true });
+    }
+  }
+
+  return {
+    status: (found.entry.suggestions || []).length ? 'ok' : 'base',
+    stagePrefix: p.stagePrefix,
+    display: found.entry.display,
+    fromKey: found.key,
+    uk, koap
+  };
+}
+
+/**
+ * Тезисы и доводы для известных пар «вменённая → предлагаемая» (демо-контент
+ * под фабулу стенда). Варианты статей — только из справочника; для пары без
+ * контента визард строит шаблонную заготовку.
+ */
+const REQUALIFY_CONTENT = [
       {
-        id: 'r-158-30',
+        from: /ст\.?\s*161/i,
         to: 'ч. 3 ст. 30, ч. 1 ст. 158 УК РФ',
-        short: 'Покушение на кражу',
         thesis: 'Хищение не носило открытый характер: умысел был направлен на тайное изъятие имущества, а деяние не доведено до конца по независящим обстоятельствам.',
         args: [
           {
@@ -580,9 +701,8 @@ const REQUALIFY_TABLE = [
         ]
       },
       {
-        id: 'r-158',
+        from: /ст\.?\s*161/i,
         to: 'ч. 1 ст. 158 УК РФ',
-        short: 'Кража (тайное хищение)',
         thesis: 'Действия подзащитного охватывались умыслом на тайное хищение: признак открытости, образующий состав грабежа, отсутствует.',
         args: [
           {
@@ -602,9 +722,8 @@ const REQUALIFY_TABLE = [
         ]
       },
       {
-        id: 'r-161-30',
+        from: /ст\.?\s*161/i,
         to: 'ч. 3 ст. 30, ч. 1 ст. 161 УК РФ',
-        short: 'Покушение на грабёж',
         thesis: 'Деяние не доведено до конца: возможность распорядиться имуществом не наступила, задержание произошло на месте.',
         args: [
           {
@@ -623,14 +742,11 @@ const REQUALIFY_TABLE = [
           }
         ]
       }
-    ]
-  }
 ];
 
-/** Варианты переквалификации для вменённой статьи (или пусто, если таблица её не знает). */
-function findRequalifyOptions(from) {
-  const row = REQUALIFY_TABLE.find(r => r.match.test(from || ''));
-  return row ? row.options : [];
+/** Контент тезиса и доводов для пары «вменённая → предлагаемая» (или null). */
+function findRequalifyContent(fromText, toArticle) {
+  return REQUALIFY_CONTENT.find(c => c.from.test(fromText || '') && c.to === toArticle) || null;
 }
 
 /* ================= Каталог ходатайств ================= */

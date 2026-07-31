@@ -1034,9 +1034,23 @@ function mwRequalify(el, s) {
 
   const fromInput = box.querySelector('[data-k="from"]');
   const varsEl = box.querySelector('.mw-req__vars');
-  let opts = [];
-  let picked = null;     // объект таблицы либо { manual: true }
+  let picked = null;     // { article, key, content } либо { manual: true }
   let manualArgs = [];   // заготовка доводов для ручной статьи
+
+  /** Шаблонная заготовка тезиса и доводов для пары без контента. */
+  const genericContent = (from, article) => ({
+    thesis: `Квалификация деяния по ${from || 'вменённой статье'} является ошибочной: действия подзащитного подлежат квалификации по ${article}.`,
+    args: [
+      {
+        text: `Фактические обстоятельства дела не содержат признаков состава преступления, предусмотренного ${from || 'вменённой статьёй'}.`,
+        grounds: [{ type: 'norm', text: 'ст. 73 УПК РФ — обстоятельства, подлежащие доказыванию' }]
+      },
+      {
+        text: `Совершённое деяние охватывается признаками состава преступления, предусмотренного ${article}.`,
+        grounds: [{ type: 'norm', text: article }]
+      }
+    ]
+  });
 
   /** Текущий ответ шага по состоянию контролов (для живой сборки и «Готово»). */
   const collect = () => {
@@ -1044,6 +1058,7 @@ function mwRequalify(el, s) {
     if (!picked) return ans;
     if (picked.manual) {
       const mv = varsEl.querySelector('.mw-var--manual');
+      if (!mv) return ans;
       ans.to = ((mv.querySelector('input[data-k="to"]') || {}).value || '').trim();
       const th = mv.querySelector('.mw-thesis');
       ans.thesis = th ? th.innerText.replace(/\s+/g, ' ').trim() : '';
@@ -1059,16 +1074,17 @@ function mwRequalify(el, s) {
     }
     const openVar = varsEl.querySelector('.mw-var.is-open');
     if (!openVar) return ans;
-    ans.to = picked.to;
-    ans.thesis = openVar.querySelector('.mw-thesis').innerText.replace(/\s+/g, ' ').trim();
+    ans.to = picked.article;
+    const th = openVar.querySelector('.mw-thesis');
+    ans.thesis = th ? th.innerText.replace(/\s+/g, ' ').trim() : '';
     ans.args = [...openVar.querySelectorAll('.mw-arg')]
       .filter(a => a.querySelector('input').checked)
       .map(a => ({
         text: a.querySelector('.mw-arg__text').innerText.replace(/\s+/g, ' ').trim(),
-        grounds: picked.args[+a.dataset.ai].grounds,
+        grounds: (picked.content.args[+a.dataset.ai] || {}).grounds || [],
         // стабильный ключ довода: по нему при пересборке сохраняются правки
         // оснований, сделанные слева в конструкторе
-        srcKey: `${picked.id}:${a.dataset.ai}`
+        srcKey: `${picked.key}:${a.dataset.ai}`
       }))
       .filter(a => a.text);
     return ans;
@@ -1085,20 +1101,29 @@ function mwRequalify(el, s) {
     }, immediate ? 0 : 500);
   };
 
+  let ukList = [];
   const renderVars = () => {
-    opts = findRequalifyOptions(fromInput.value);
+    const from = fromInput.value.trim();
+    const sug = reqSuggestions(from);
     picked = null;
-    varsEl.innerHTML = opts.map(o => `
-      <div class="mw-var" data-id="${o.id}">
+    ukList = sug.uk || [];
+
+    // карточка варианта УК: тезис и доводы (контент пары или заготовка)
+    const ukCard = (v, i) => {
+      const content = findRequalifyContent(from, v.article) || genericContent(from, v.article);
+      v.content = content;
+      return `
+      <div class="mw-var" data-i="${i}">
         <button class="mw-var__head" type="button">
-          <span class="mw-var__to">${o.to}</span>
-          <span class="mw-var__short">${o.short}</span>
+          <span class="mw-var__to">${v.article}</span>
+          <span class="mw-var__short">${v.title || ''}</span>
+          ${v.note ? `<span class="mw-var__note">${v.note}</span>` : ''}
         </button>
         <div class="mw-var__body">
           <div class="mw-var__cap">Тезис</div>
-          <div class="mw-thesis" contenteditable="true">${o.thesis}</div>
+          <div class="mw-thesis" contenteditable="true">${content.thesis}</div>
           <div class="mw-var__cap">Доводы</div>
-          ${o.args.map((a, ai) => `
+          ${content.args.map((a, ai) => `
             <div class="mw-arg" data-ai="${ai}">
               <label class="mw-arg__row">
                 <input type="checkbox" checked>
@@ -1108,7 +1133,43 @@ function mwRequalify(el, s) {
                 `<div class="mw-gr"><span class="mw-gb mw-gb--${g.type}">${GROUND_LABELS[g.type] || g.type}</span><span>${g.text}</span></div>`).join('')}</div>
             </div>`).join('')}
         </div>
-      </div>`).join('') + `
+      </div>`;
+    };
+
+    // карточка КоАП: юридически это прекращение дела, а не переквалификация
+    const koapCard = (v, i) => `
+      <div class="mw-var mw-var--koap" data-k="${i}">
+        <button class="mw-var__head" type="button">
+          <span class="mw-var__to">${v.article}</span>
+          <span class="mw-var__short">${v.title || ''}</span>
+          ${v.note ? `<span class="mw-var__note">${v.note}</span>` : ''}
+        </button>
+        <div class="mw-var__body">
+          <div class="mw-hint">Деяние подпадает под административную ответственность — юридически это не переквалификация,
+            а прекращение уголовного преследования в связи с декриминализацией. Рекомендуемый путь —
+            ходатайство о прекращении уголовного дела.</div>
+          <button class="mw-add mw-var__go" type="button">Перейти к ходатайству о прекращении дела</button>
+        </div>
+      </div>`;
+
+    let head = '';
+    if (sug.status === 'invalid' && from) {
+      head = `<div class="mw-hint">Не удалось распознать статью — проверьте формат (образец: «ч. 1 ст. 158 УК РФ»).</div>`;
+    } else if (sug.status === 'multi') {
+      head = `<div class="mw-hint">Во вменённой квалификации несколько статей — ходатайство готовится по одной. По какой статье готовим?</div>
+        <div class="mw-req__split">${sug.parts.map(pt =>
+          `<button class="mw-item" type="button" data-key="${pt.key}">${pt.key.replace(/ч\./g, 'ч. ').replace(/ст\./g, 'ст. ').replace(/п\./g, 'п. ')} УК РФ</button>`).join('')}</div>`;
+    } else if (sug.status === 'none') {
+      head = `<div class="mw-hint">Для этой статьи в справочнике нет готовых вариантов — укажите статью для переквалификации вручную.</div>`;
+    } else if (sug.status === 'base') {
+      head = `<div class="mw-hint">Это базовый состав — более мягкой статьи в справочнике нет. Доступны покушение и ручной ввод.</div>`;
+    }
+
+    varsEl.innerHTML = head +
+      (sug.status === 'multi' ? '' : ukList.map(ukCard).join('')) +
+      (sug.koap && sug.koap.length && sug.status !== 'multi' ? `
+        <div class="mw-req__koap-cap">Прекращение дела в связи с декриминализацией</div>
+        ${sug.koap.map(koapCard).join('')}` : '') + `
       <div class="mw-var mw-var--manual">
         <button class="mw-var__head" type="button">
           <span class="mw-var__to">Другая статья</span>
@@ -1119,10 +1180,21 @@ function mwRequalify(el, s) {
           <div class="mw-hint">Введите статью — система предложит заготовку тезиса и доводов; формулировки правятся здесь и слева в конструкторе.</div>
           <div class="mw-req__manual"></div>
         </div>
-      </div>`;
+      </div>` +
+      (sug.status !== 'multi'
+        ? `<div class="mw-req__disclaimer">Варианты сформированы по справочной таблице и являются ориентиром; применимость переквалификации определяется фактическими обстоятельствами дела.</div>`
+        : '');
 
-    // статью таблица не знает — сразу раскрываем ручной ввод
-    if (!opts.length) {
+    // совокупность: выбор статьи подставляет её в поле и пересчитывает варианты
+    varsEl.querySelectorAll('.mw-req__split .mw-item').forEach(b => b.addEventListener('click', () => {
+      if (b.disabled) return;
+      fromInput.value = b.textContent.trim();
+      renderVars();
+      liveSync(false);
+    }));
+
+    // вариантов нет — сразу раскрываем ручной ввод
+    if ((sug.status === 'none' || sug.status === 'invalid') && !ukList.length) {
       varsEl.querySelector('.mw-var--manual').classList.add('is-open');
       picked = { manual: true };
     }
@@ -1130,9 +1202,18 @@ function mwRequalify(el, s) {
       if (h.disabled) return;
       const v = h.closest('.mw-var');
       varsEl.querySelectorAll('.mw-var').forEach(x => x.classList.toggle('is-open', x === v));
-      picked = v.classList.contains('mw-var--manual') ? { manual: true } : opts.find(o => o.id === v.dataset.id);
+      if (v.classList.contains('mw-var--manual')) picked = { manual: true };
+      else if (v.classList.contains('mw-var--koap')) picked = null;   // КоАП — не вариант переквалификации
+      else picked = ukList[+v.dataset.i];
       scrollFeed();
       liveSync(true);   // предвыбранные доводы сразу встают в текст документа
+    }));
+    // переход в сценарий прекращения дела (открытый вопрос ТЗ решён кнопкой)
+    varsEl.querySelectorAll('.mw-var__go').forEach(b => b.addEventListener('click', () => {
+      if (b.disabled || state.busy) return;
+      addMessage('user', 'Перейти к ходатайству о прекращении дела');
+      mwCtx.answers = {};
+      pickMotion('termination');
     }));
     // галка довода: снял — довод исчез из документа, вернул — появился;
     // правка тезиса или текста довода тоже подтягивается (с задержкой)
@@ -1191,10 +1272,29 @@ function mwRequalify(el, s) {
     if (state.busy) return;
     clearTimeout(liveTimer);
     const ans = collect();
+
+    // ручной ввод валидируется той же нормализацией, что и подбор
+    if (picked && picked.manual && ans.to) {
+      const mv = varsEl.querySelector('.mw-var--manual input[data-k="to"]');
+      const parsed = reqParse(ans.to);
+      if (!parsed.parts.length) {
+        if (mv) mv.classList.add('is-invalid');
+        return mwWarn(el, 'Не удалось распознать статью. Образец формата: «ч. 1 ст. 158 УК РФ».');
+      }
+      if (mv) mv.classList.remove('is-invalid');
+      // неблокирующее предупреждение: та же статья, но более тяжкая часть
+      const fromP = reqParse(ans.from).parts[0];
+      const toP = parsed.parts[0];
+      if (fromP && toP && fromP.art === toP.art && fromP.part && toP.part
+          && parseFloat(toP.part) > parseFloat(fromP.part)) {
+        mwWarn(el, `Внимание: ч. ${toP.part} ст. ${toP.art} УК РФ по справочнику тяжелее вменённой ч. ${fromP.part} — проверьте, что это осознанный выбор.`);
+      }
+    }
+
     if ((!ans.from || !ans.to) && !warned) {
       warned = true;
       ok.textContent = 'Всё равно продолжить';
-      return mwWarn(el, 'Выберите вариант переквалификации из таблицы или укажите свою статью. Либо нажмите ещё раз — в документе останутся жёлтые метки.');
+      return mwWarn(el, 'Выберите вариант переквалификации из справочника или укажите свою статью. Либо нажмите ещё раз — в документе останутся жёлтые метки.');
     }
     el.querySelectorAll('button, input, [contenteditable]').forEach(x => {
       x.disabled = true;
